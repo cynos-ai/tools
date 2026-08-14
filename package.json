@@ -1,0 +1,76 @@
+{
+  "name": "@cynos-ai/tools",
+  "version": "0.2.0",
+  "description": "Cynos universal search, vision, and browser tools for the pi coding agent.",
+  "keywords": [
+    "pi-package",
+    "pi-extension",
+    "cynos",
+    "search",
+    "vision",
+    "browser",
+    "playwright"
+  ],
+  "license": "MIT",
+  "author": "Jay Shen <shenjiecode@gmail.com>",
+  "engines": {
+    "node": ">=22"
+  },
+  "homepage": "https://www.npmjs.com/package/@cynos-ai/tools",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/cynos-ai/tools.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "main": "./index.js",
+  "types": "./index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "require": "./index.js",
+      "default": "./index.js"
+    }
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "verify": "npm run typecheck && npm test && npm run build:smoke",
+    "build": "node scripts/build.mjs",
+    "build:smoke": "npm run build && node scripts/smoke-built-index.mjs",
+    "pack:dry-run": "node scripts/check-pack.mjs",
+    "prepack": "npm run build",
+    "prepublishOnly": "npm run verify"
+  },
+  "files": [
+    "README.md",
+    "README-zh-CN.md",
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md",
+    "index.js",
+    "index.d.ts"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.js"
+    ]
+  },
+  "dependencies": {
+    "playwright-core": "1.61.1"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.10",
+    "@earendil-works/pi-tui": "0.80.10",
+    "@types/node": "25.9.5",
+    "esbuild": "0.28.1",
+    "typebox": "1.3.6",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": ">=0.80.2",
+    "@earendil-works/pi-tui": ">=0.80.2",
+    "typebox": ">=1.0.59"
+  }
+}
