@@ -5,7 +5,7 @@ import type { ToolsConfig } from "./store";
 // Idempotent one-way migration from the legacy ~/.pi/agent/cynos-config.json
 // (which Engineer used to own) into the new ~/.pi/agent/cynos-tools.json.
 //
-// Rules (per the implementation plan §3.2):
+// Migration rules:
 //   - Only runs when the new file does NOT already exist.
 //   - Copies only Tools-owned fields: visionModel, exaApiKey, tavilyApiKey.
 //   - Legacy file is never modified or deleted.
