@@ -7,6 +7,13 @@ Search, vision, and browser tools for the [pi](https://github.com/earendil-works
 [![npm version](https://img.shields.io/npm/v/@cynos-ai/tools.svg)](https://www.npmjs.com/package/@cynos-ai/tools)
 [![GitHub release](https://img.shields.io/github/v/release/cynos-ai/tools.svg)](https://github.com/cynos-ai/tools/releases)
 
+## Requirements
+
+- Node.js 22 or newer
+- [pi](https://github.com/earendil-works/pi-coding-agent) installed and available as `pi`
+- Exa or Tavily API keys are optional; search has a free Exa MCP fallback
+- A vision-capable model configured before using `cynos_vision`
+
 ## What it gives you
 
 Four capabilities, exposed as pi tools the agent can call directly:
@@ -107,6 +114,13 @@ Workflow: `cynos_browser_navigate` → `cynos_browser_inspect(action="snapshot")
 - `eval` runs arbitrary JavaScript in the page context and can change page state — treat it as the same trust level as `bash`.
 - API-key config files are written `0600`. Never commit them.
 - Browser console/network buffers drop request/response bodies and sensitive headers (`authorization`, `cookie`, etc.).
+
+## Documentation and maintenance
+
+- [Contributing](./CONTRIBUTING.md)
+- [Security policy](./SECURITY.md)
+- [Changelog](./CHANGELOG.md)
+- [Third-party notices](./THIRD_PARTY_NOTICES.md)
 
 ## License
 
