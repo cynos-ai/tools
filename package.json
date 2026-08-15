@@ -16,7 +16,7 @@
   "engines": {
     "node": ">=22"
   },
-  "homepage": "https://www.npmjs.com/package/@cynos-ai/tools",
+  "homepage": "https://github.com/cynos-ai/tools#readme",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/cynos-ai/tools.git"
