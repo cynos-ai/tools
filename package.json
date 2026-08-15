@@ -1,6 +1,6 @@
 {
   "name": "@cynos-ai/tools",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "description": "Cynos universal search, vision, and browser tools for the pi coding agent.",
   "keywords": [
     "pi-package",

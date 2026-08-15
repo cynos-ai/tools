@@ -7,6 +7,13 @@
 [![npm 版本](https://img.shields.io/npm/v/@cynos-ai/tools.svg)](https://www.npmjs.com/package/@cynos-ai/tools)
 [![GitHub 发布](https://img.shields.io/github/v/release/cynos-ai/tools.svg)](https://github.com/cynos-ai/tools/releases)
 
+## 使用要求
+
+- Node.js 22 或更高版本
+- 已安装并可调用的 [pi](https://github.com/earendil-works/pi-coding-agent)
+- Exa 或 Tavily API key 可选；搜索有免费的 Exa MCP 兜底
+- 使用 `cynos_vision` 前，需要配置支持视觉的模型
+
 ## 提供的能力
 
 四类能力，以 agent 可直接调用的 pi 工具形式提供：
@@ -107,6 +114,13 @@ URL 策略：
 - `eval` 在页面上下文执行任意 JavaScript，可以改变页面状态——信任级别与 `bash` 相同。
 - API key 配置文件以 `0600` 权限写入。永远不要提交它们。
 - 浏览器 console/network 缓冲会丢弃 request/response body 和敏感 header（`authorization`、`cookie` 等）。
+
+## 文档与维护
+
+- [贡献指南](./CONTRIBUTING.md)
+- [安全策略](./SECURITY.md)
+- [变更记录](./CHANGELOG.md)
+- [第三方许可说明](./THIRD_PARTY_NOTICES.md)
 
 ## 许可证
 
