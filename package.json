@@ -58,7 +58,7 @@
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
-    "@earendil-works/pi-tui": "0.80.10",
+    "@earendil-works/pi-tui": "0.84.1",
     "@types/node": "25.9.5",
     "esbuild": "0.28.1",
     "playwright-core": "1.61.1",
