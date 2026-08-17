@@ -94,7 +94,17 @@ Order: user-preferred REST → other configured REST → free Exa MCP. Search wo
 
 ### Browser
 
-Tools uses `playwright-core` and does **not** bundle a browser. On first use:
+Browser support is optional so ordinary search/vision installs do not pull in the
+Playwright runtime. To enable browser tools in a host project, install the
+optional peer explicitly:
+
+```bash
+npm install --save-dev playwright-core
+```
+
+Without it, search, vision, and configuration still work; browser calls return a
+clear setup error instead of failing during Tools startup. Once installed, Tools
+uses `playwright-core` and does **not** bundle a browser. On first use:
 
 1. If a system Chrome / Chromium / Edge is detected, Tools launches it directly.
 2. Otherwise Tools returns a clear setup pointer. Run `/cynos-tools-browser-setup` to probe, or to install Chromium via `playwright-core` (explicit confirmation required — ~150 MB download).
