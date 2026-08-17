@@ -82,6 +82,10 @@ function makePi() {
 try {
   const require = createRequire(import.meta.url);
   const mod = require(indexPath);
+  const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+  if (mod?.CYNOS_TOOLS_PACKAGE_VERSION !== packageJson.version) {
+    throw new Error(`built runtime version ${mod?.CYNOS_TOOLS_PACKAGE_VERSION ?? "<missing>"} does not match package.json ${packageJson.version}`);
+  }
   const activate = mod?.default ?? mod?.activateCynosTools;
   if (typeof activate !== "function") throw new Error("index.js does not expose activateCynosTools / default");
 

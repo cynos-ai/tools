@@ -1,4 +1,5 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import packageJson from "../package.json";
 
 // ============================================================
 // Process-level activation registry for @cynos-ai/tools.
@@ -17,7 +18,9 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 // ============================================================
 
 export const CYNOS_TOOLS_PROTOCOL_VERSION = 1;
-export const CYNOS_TOOLS_PACKAGE_VERSION = "0.1.2";
+// Keep the activation record aligned with the package that owns the bundle.
+// This value is inlined by esbuild, so package.json is not required at runtime.
+export const CYNOS_TOOLS_PACKAGE_VERSION = packageJson.version;
 
 export interface ActivationRecord {
   protocolVersion: number;

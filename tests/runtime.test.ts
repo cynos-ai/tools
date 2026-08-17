@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
+import packageJson from "../package.json";
 import {
   activateCynosTools,
+  CYNOS_TOOLS_PACKAGE_VERSION,
   CYNOS_TOOLS_PROTOCOL_VERSION,
 } from "../extensions";
 import {
@@ -217,8 +219,14 @@ describe("activateCynosTools cross-extension coexistence", () => {
   });
 });
 
-describe("protocol version", () => {
-  it("exports version 1", () => {
+describe("runtime versions", () => {
+  it("exports the protocol version", () => {
     expect(CYNOS_TOOLS_PROTOCOL_VERSION).toBe(1);
+  });
+
+  it("uses the package.json version in activation records", () => {
+    resetRegistry();
+    expect(CYNOS_TOOLS_PACKAGE_VERSION).toBe(packageJson.version);
+    expect(markActivated(fakePi()).record.packageVersion).toBe(packageJson.version);
   });
 });
