@@ -4,7 +4,7 @@
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import * as path from "node:path";
-import { chromium, type Browser, type BrowserContext, type Page } from "playwright-core";
+import type { Browser, BrowserContext, Page } from "playwright-core";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getBrowserConfig, type BrowserConfig } from "../config/store";
 import {
@@ -70,6 +70,22 @@ function readBrowserConfigSync(): BrowserConfig {
   }
 }
 
+type PlaywrightCore = typeof import("playwright-core");
+let playwrightCorePromise: Promise<PlaywrightCore> | undefined;
+
+async function loadPlaywrightCore(): Promise<PlaywrightCore> {
+  if (!playwrightCorePromise) {
+    playwrightCorePromise = import("playwright-core").catch((error) => {
+      playwrightCorePromise = undefined;
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new BrowserUnavailableError(
+        `Optional browser support is not installed. Add playwright-core to the host project before using browser tools.${detail ? ` (${detail})` : ""}`,
+      );
+    });
+  }
+  return playwrightCorePromise;
+}
+
 async function tryLaunch(opts: { executablePath?: string; channel?: "chrome" | "chromium" | "msedge"; headless: boolean; timeoutMs: number }): Promise<Browser> {
   const launchOpts: Record<string, unknown> = {
     headless: opts.headless,
@@ -78,6 +94,7 @@ async function tryLaunch(opts: { executablePath?: string; channel?: "chrome" | "
   if (opts.executablePath) launchOpts.executablePath = opts.executablePath;
   else if (opts.channel) launchOpts.channel = opts.channel;
 
+  const { chromium } = await loadPlaywrightCore();
   return chromium.launch(launchOpts);
 }
 

@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const indexPath = path.join(root, "index.js");
+const withoutPlaywright = process.argv.includes("--without-playwright");
 
 if (!fs.existsSync(indexPath)) {
   console.error("Built artifact missing: index.js. Run npm run build first.");
@@ -59,7 +60,10 @@ Module._load = function patchedLoad(request, parent, isMain) {
   if (request === "typebox") return typeboxStub;
   if (request === "typebox/compile") return { TypeCompiler: { Compile: () => ({ Check: () => true, Errors: () => [] }) } };
   if (request === "typebox/value") return { Value: { Check: () => true, Errors: () => [], Parse: (_s, v) => v } };
-  if (request === "playwright-core") return playwrightStub;
+  if (request === "playwright-core") {
+    if (withoutPlaywright) throw new Error("playwright-core should remain optional during core activation smoke");
+    return playwrightStub;
+  }
   return originalLoad.call(this, request, parent, isMain);
 };
 
@@ -132,7 +136,7 @@ try {
     throw new Error(`new pi instance after reload should re-register all tools (got ${afterReload.registeredTools.length})`);
   }
 
-  console.log(`✓ built index.js smoke OK (main=${main.registeredTools.length} tools/${main.commands.length} cmds; researcher subset verified)`);
+  console.log(`✓ built index.js smoke OK (main=${main.registeredTools.length} tools/${main.commands.length} cmds; researcher subset verified${withoutPlaywright ? "; core activation works without playwright-core" : ""})`);
 } finally {
   Module._load = originalLoad;
   if (prevRole === undefined) delete process.env.CYNOS_AGENT_ROLE;

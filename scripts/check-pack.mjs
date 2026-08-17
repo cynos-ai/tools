@@ -33,8 +33,8 @@ if (forbidden.length > 0) {
   process.exit(1);
 }
 
-// playwright-core must be in node_modules (runtime dep), but its browser binaries
-// must NOT be in the tarball.
+// playwright-core is an optional peer; its browser binaries must NOT be in the
+// tarball even when the development install has the peer available.
 const browserBinary = [...files].find((file) => /(^|\/)\.local-browsers\//.test(file) || /chromium-[0-9]/.test(file));
 if (browserBinary) {
   console.error(`npm package includes a browser binary, which must not ship: ${browserBinary}`);

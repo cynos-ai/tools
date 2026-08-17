@@ -38,7 +38,7 @@
     "test": "vitest run",
     "verify": "npm run typecheck && npm test && npm run build:smoke",
     "build": "node scripts/build.mjs",
-    "build:smoke": "npm run build && node scripts/smoke-built-index.mjs",
+    "build:smoke": "npm run build && node scripts/smoke-built-index.mjs && node scripts/smoke-built-index.mjs --without-playwright",
     "pack:dry-run": "node scripts/check-pack.mjs",
     "prepack": "npm run build",
     "prepublishOnly": "npm run verify"
@@ -56,14 +56,12 @@
       "./index.js"
     ]
   },
-  "dependencies": {
-    "playwright-core": "1.61.1"
-  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.10",
     "@earendil-works/pi-tui": "0.80.10",
     "@types/node": "25.9.5",
     "esbuild": "0.28.1",
+    "playwright-core": "1.61.1",
     "typebox": "1.3.6",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
@@ -71,6 +69,12 @@
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": ">=0.80.2",
     "@earendil-works/pi-tui": ">=0.80.2",
-    "typebox": ">=1.0.59"
+    "typebox": ">=1.0.59",
+    "playwright-core": ">=1.61.1"
+  },
+  "peerDependenciesMeta": {
+    "playwright-core": {
+      "optional": true
+    }
   }
 }

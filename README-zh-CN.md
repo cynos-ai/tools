@@ -94,7 +94,16 @@ pi remove npm:@cynos-ai/tools
 
 ### 浏览器
 
-Tools 使用 `playwright-core`，**不**捆绑浏览器。首次使用时：
+浏览器支持是可选的，因此普通的搜索/视觉安装不会自动拉取 Playwright
+运行时。需要浏览器时，在宿主项目中显式安装可选 peer：
+
+```bash
+npm install --save-dev playwright-core
+```
+
+没有安装它时，搜索、视觉和配置功能仍然可用；浏览器调用会返回明确的
+setup 错误，不会在 Tools 启动阶段直接失败。安装后，Tools 使用
+`playwright-core`，但**不**捆绑浏览器。首次使用时：
 
 1. 检测到系统 Chrome / Chromium / Edge，则直接启动。
 2. 否则 Tools 返回明确的 setup 指引。运行 `/cynos-tools-browser-setup` 探测，或通过 `playwright-core` 安装 Chromium（需要明确确认，约 150 MB 下载）。
