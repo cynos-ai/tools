@@ -2,6 +2,11 @@
 
 All notable public changes to Cynos Tools are documented here.
 
+## 0.2.3
+
+- Derive the activation runtime package version from `package.json` instead of a stale hardcoded value.
+- Verify the exported runtime version in unit tests and the built-artifact smoke test.
+
 ## 0.2.2
 
 - Document Node.js and pi prerequisites.
