@@ -2,6 +2,11 @@
 
 All notable public changes to Cynos Tools are documented here.
 
+## 0.3.1
+
+- Use `cynos_vision` only as a fallback when the active model cannot process images.
+- Hide the fallback tool from vision-capable models and direct them to read images natively.
+
 ## 0.3.0
 
 - Make `playwright-core` an optional peer and lazy-load browser support so ordinary installs stay lightweight.

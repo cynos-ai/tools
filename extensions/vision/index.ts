@@ -14,6 +14,24 @@ import { getVisionModel } from "../config/store";
 const MODES = ["describe", "ocr", "compare", "ui"] as const;
 type VisionMode = (typeof MODES)[number];
 
+function modelSupportsImages(model: { input?: string[] } | undefined): boolean {
+  return !!model?.input?.includes("image");
+}
+
+function syncVisionToolAvailability(pi: ExtensionAPI, model: { input?: string[] } | undefined): void {
+  const getActiveTools = (pi as any).getActiveTools;
+  const setActiveTools = (pi as any).setActiveTools;
+  if (typeof getActiveTools !== "function" || typeof setActiveTools !== "function") return;
+
+  const active = getActiveTools.call(pi) as string[];
+  const next = modelSupportsImages(model)
+    ? active.filter((name) => name !== "cynos_vision")
+    : active.includes("cynos_vision") ? active : [...active, "cynos_vision"];
+  if (next.length !== active.length || next.some((name, i) => name !== active[i])) {
+    setActiveTools.call(pi, next);
+  }
+}
+
 function nonEmptyString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
@@ -63,12 +81,11 @@ export function registerVisionTool(pi: ExtensionAPI): void {
     name: "cynos_vision",
     label: "Cynos Vision",
     description:
-      "Analyze one or more local image files using the configured vision model. Supports describe, ocr (transcribe text), compare (multi-image), and ui (UI/layout analysis) modes. " +
-      "Images are sent to the configured vision model provider. Returns a structured description you can use directly.",
-    promptSnippet: "Analyze local image files (screenshots, UI, charts, diagrams) with the vision model",
+      "Fallback image analysis for when the current model cannot accept image input. Uses the separately configured vision model and supports describe, ocr, compare, and ui modes. " +
+      "Do not use this tool when the current model supports images; use read directly instead.",
+    promptSnippet: "Fallback image analysis when the current model does not support images",
     promptGuidelines: [
-      "Use cynos_vision when you need to understand an image file (screenshot, diagram, photo) — do not use the read tool on images.",
-      "cynos_vision sends images to the configured vision model and returns a description. Check screenshot/chart/UI details this way.",
+      "Use cynos_vision only when the current model does not support image input; when it does, use read directly on image files instead.",
     ],
     parameters: {
       type: "object",
@@ -93,9 +110,17 @@ export function registerVisionTool(pi: ExtensionAPI): void {
     } as any,
 
     async execute(_toolCallId: string, params: any, signal: AbortSignal, onUpdate: any, ctx: any) {
-      // Defensive: never register/run inside a vision child.
+      // Defensive: never register/run inside a vision child, or delegate away
+      // from a main model that can already inspect images itself.
       if (isVisionChild()) {
         return { content: [{ type: "text" as const, text: "cynos_vision cannot run inside a vision child process." }], details: {} as any };
+      }
+      if (modelSupportsImages(ctx.model)) {
+        return {
+          content: [{ type: "text" as const, text: "The current model supports image input. Use read directly on the image file instead of cynos_vision." }],
+          details: {} as any,
+          isError: true,
+        };
       }
 
       const rawImages = asStringArray(params.images);
@@ -198,6 +223,11 @@ export function registerVisionTool(pi: ExtensionAPI): void {
       return new Text(text, 0, 0);
     },
   });
+
+  // Keep the fallback out of the model's tool list whenever native image input
+  // is available. model_select also covers the initial model restoration.
+  pi.on("session_start", (_event, ctx) => syncVisionToolAvailability(pi, ctx.model));
+  pi.on("model_select", (event) => syncVisionToolAvailability(pi, event.model));
 }
 
 export { registerVisionGuard } from "./guard";
