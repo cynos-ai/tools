@@ -27,6 +27,8 @@ export interface ManagedBrowserSession {
   browser: Browser;
   context: BrowserContext;
   page: Page;
+  /** Whether the browser was launched headless (annotate needs a headed relaunch). */
+  headless: boolean;
   consoleEvents: ConsoleEvent[];
   networkEvents: NetworkEvent[];
   refs: Map<string, ElementInfo>;

@@ -86,11 +86,12 @@ async function loadPlaywrightCore(): Promise<PlaywrightCore> {
   return playwrightCorePromise;
 }
 
-async function tryLaunch(opts: { executablePath?: string; channel?: "chrome" | "chromium" | "msedge"; headless: boolean; timeoutMs: number }): Promise<Browser> {
+async function tryLaunch(opts: { executablePath?: string; channel?: "chrome" | "chromium" | "msedge"; headless: boolean; timeoutMs: number; args?: string[] }): Promise<Browser> {
   const launchOpts: Record<string, unknown> = {
     headless: opts.headless,
     timeout: opts.timeoutMs,
   };
+  if (opts.args?.length) launchOpts.args = opts.args;
   if (opts.executablePath) launchOpts.executablePath = opts.executablePath;
   else if (opts.channel) launchOpts.channel = opts.channel;
 
@@ -123,6 +124,8 @@ export class BrowserUnavailableError extends Error {
 export interface EnsureSessionOptions {
   cwd: string;
   sessionId?: string;
+  /** Force headless on/off for this launch, overriding config (used by /annotate). */
+  headlessOverride?: boolean;
   onConsole?: (text: string) => void;
 }
 
@@ -146,11 +149,13 @@ export async function ensureSession(options: EnsureSessionOptions): Promise<Mana
   let lastError: unknown;
   for (const candidate of candidates) {
     try {
+      const headless = options.headlessOverride ?? config.headless;
       const browser = await tryLaunch({
         executablePath: candidate.executablePath,
         channel: candidate.channel,
-        headless: config.headless,
+        headless,
         timeoutMs: config.timeoutMs,
+        args: config.args,
       });
       const context = await browser.newContext({
         // Isolated, ephemeral context. No persistent profile, no user cookies.
@@ -178,6 +183,7 @@ export async function ensureSession(options: EnsureSessionOptions): Promise<Mana
         browser,
         context,
         page,
+        headless,
         consoleEvents,
         networkEvents,
         refs: new Map(),

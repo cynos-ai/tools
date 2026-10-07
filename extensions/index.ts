@@ -14,6 +14,7 @@ import { registerToolsConfigCommand } from "./config/command";
 import { registerSearchTools } from "./search";
 import { registerVisionGuard, registerVisionTool } from "./vision";
 import { registerBrowserTools } from "./browser";
+import { registerAnnotateCommand, registerAnnotateTool } from "./browser/annotate";
 import { registerBrowserShutdown } from "./browser/launch";
 import { registerBrowserSetupCommand } from "./browser/setup-command";
 
@@ -105,6 +106,8 @@ export function activateCynosTools(pi: ExtensionAPI): Promise<void> | void {
   registerVisionTool(pi);
   registerVisionGuard(pi);
   registerBrowserTools(pi);
+  registerAnnotateCommand(pi);
+  registerAnnotateTool(pi);
   registerBrowserShutdown(pi);
   registerToolsConfigCommand(pi);
   registerBrowserSetupCommand(pi);

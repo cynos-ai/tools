@@ -30,6 +30,9 @@ const MENU_KEYS = {
   BROWSER_HEADLESS: "bheadless",
   BROWSER_EXECUTABLE: "bexe",
   BROWSER_TIMEOUT: "btimeout",
+  ANNOTATE_TIMEOUT: "atimeout",
+  ANNOTATE_SHOTS: "ashots",
+  ANNOTATE_LANG: "alang",
 } as const;
 
 const MENU_ITEMS: { key: string; label: string }[] = [
@@ -41,6 +44,9 @@ const MENU_ITEMS: { key: string; label: string }[] = [
   { key: MENU_KEYS.BROWSER_EXECUTABLE, label: "Browser executable" },
   { key: MENU_KEYS.BROWSER_HEADLESS, label: "Browser headless" },
   { key: MENU_KEYS.BROWSER_TIMEOUT, label: "Browser timeout" },
+  { key: MENU_KEYS.ANNOTATE_TIMEOUT, label: "Annotate timeout" },
+  { key: MENU_KEYS.ANNOTATE_SHOTS, label: "Annotate screenshots" },
+  { key: MENU_KEYS.ANNOTATE_LANG, label: "Annotate UI language" },
 ];
 const LABEL_WIDTH = Math.max(...MENU_ITEMS.map((m) => m.label.length));
 
@@ -55,6 +61,9 @@ export function buildMenu(config: ToolsConfig): string[] {
     [MENU_KEYS.BROWSER_EXECUTABLE, browser.executablePath ?? "auto-detect"],
     [MENU_KEYS.BROWSER_HEADLESS, browser.headless === false ? "Off (show window)" : "On (default)"],
     [MENU_KEYS.BROWSER_TIMEOUT, browser.timeoutMs ? `${browser.timeoutMs} ms` : "30000 ms (default)"],
+    [MENU_KEYS.ANNOTATE_TIMEOUT, browser.annotate?.timeoutMs ? `${browser.annotate.timeoutMs} ms` : "600000 ms (default)"],
+    [MENU_KEYS.ANNOTATE_SHOTS, browser.annotate?.screenshots === false ? "Off" : "On (default)"],
+    [MENU_KEYS.ANNOTATE_LANG, browser.annotate?.uiLanguage === "zh" ? "中文" : browser.annotate?.uiLanguage === "en" ? "English" : "Auto (system locale, zh fallback)"],
   ]);
   return MENU_ITEMS.map((item) => `${item.label.padEnd(LABEL_WIDTH + 2)} -> ${values.get(item.key)}`);
 }
@@ -75,6 +84,9 @@ async function configLoop(ctx: Ctx): Promise<void> {
     else if (key === MENU_KEYS.BROWSER_EXECUTABLE) config = await editBrowserExecutable(ctx, config);
     else if (key === MENU_KEYS.BROWSER_HEADLESS) config = await editBrowserHeadless(ctx, config);
     else if (key === MENU_KEYS.BROWSER_TIMEOUT) config = await editNumber(ctx, config, ["browser", "timeoutMs"], "Browser timeout in ms (blank = default 30000)");
+    else if (key === MENU_KEYS.ANNOTATE_TIMEOUT) config = await editNumber(ctx, config, ["browser", "annotate", "timeoutMs"], "Annotate submit timeout in ms (blank = default 600000)");
+    else if (key === MENU_KEYS.ANNOTATE_SHOTS) config = await editAnnotateScreenshots(ctx, config);
+    else if (key === MENU_KEYS.ANNOTATE_LANG) config = await editAnnotateLanguage(ctx, config);
   }
 }
 
@@ -134,14 +146,20 @@ async function editVisionModel(ctx: Ctx, config: ToolsConfig): Promise<ToolsConf
   return next;
 }
 
-async function editNumber(ctx: Ctx, config: ToolsConfig, path: "visionTimeoutMinutes" | ["browser", "timeoutMs"], prompt: string): Promise<ToolsConfig> {
+async function editNumber(
+  ctx: Ctx,
+  config: ToolsConfig,
+  path: "visionTimeoutMinutes" | ["browser", "timeoutMs"] | ["browser", "annotate", "timeoutMs"],
+  prompt: string,
+): Promise<ToolsConfig> {
   const input = await ctx.ui.input(prompt);
   if (input === undefined) return config;
   const trimmed = input.trim();
-  const next = { ...config, browser: { ...config.browser } };
+  const next = { ...config, browser: { ...config.browser, annotate: { ...config.browser?.annotate } } };
   if (!trimmed) {
     if (path === "visionTimeoutMinutes") delete next.visionTimeoutMinutes;
-    else delete next.browser!.timeoutMs;
+    else if (path.length === 2) delete next.browser!.timeoutMs;
+    else delete next.browser!.annotate!.timeoutMs;
     await save(ctx, next);
     ctx.ui.notify("Restored default", "info");
     return next;
@@ -152,7 +170,8 @@ async function editNumber(ctx: Ctx, config: ToolsConfig, path: "visionTimeoutMin
     return config;
   }
   if (path === "visionTimeoutMinutes") next.visionTimeoutMinutes = Math.floor(n);
-  else next.browser!.timeoutMs = Math.floor(n);
+  else if (path.length === 2) next.browser!.timeoutMs = Math.floor(n);
+  else next.browser!.annotate!.timeoutMs = Math.floor(n);
   await save(ctx, next);
   ctx.ui.notify("Saved", "info");
   return next;
@@ -188,6 +207,26 @@ async function editBrowserHeadless(ctx: Ctx, config: ToolsConfig): Promise<Tools
   const next = { ...config, browser: { ...config.browser, headless } };
   await save(ctx, next);
   ctx.ui.notify(`Headless ${headless ? "on" : "off"}`, "info");
+  return next;
+}
+
+async function editAnnotateScreenshots(ctx: Ctx, config: ToolsConfig): Promise<ToolsConfig> {
+  const choice = await ctx.ui.select("Annotate screenshots", ["On (default)", "Off"]);
+  if (!choice) return config;
+  const screenshots = choice.startsWith("On");
+  const next = { ...config, browser: { ...config.browser, annotate: { ...config.browser?.annotate, screenshots } } };
+  await save(ctx, next);
+  ctx.ui.notify(`Annotate screenshots ${screenshots ? "on" : "off"}`, "info");
+  return next;
+}
+
+async function editAnnotateLanguage(ctx: Ctx, config: ToolsConfig): Promise<ToolsConfig> {
+  const choice = await ctx.ui.select("Annotate UI language", ["Auto (system locale, zh fallback)", "中文", "English"]);
+  if (!choice) return config;
+  const uiLanguage: "zh" | "en" | "auto" = choice.startsWith("中文") ? "zh" : choice.startsWith("English") ? "en" : "auto";
+  const next = { ...config, browser: { ...config.browser, annotate: { ...config.browser?.annotate, uiLanguage } } };
+  await save(ctx, next);
+  ctx.ui.notify(`Annotate UI language: ${uiLanguage}`, "info");
   return next;
 }
 
