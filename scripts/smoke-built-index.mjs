@@ -97,11 +97,11 @@ try {
   const main = makePi();
   await activate(main.pi);
 
-  const expectedMainTools = ["cynos_search", "cynos_fetch", "cynos_vision", "cynos_browser_navigate", "cynos_browser_interact", "cynos_browser_inspect", "cynos_browser_close"];
+  const expectedMainTools = ["cynos_search", "cynos_fetch", "cynos_vision", "cynos_browser_navigate", "cynos_browser_interact", "cynos_browser_inspect", "cynos_browser_close", "cynos_browser_annotate"];
   for (const name of expectedMainTools) {
     if (!main.registeredTools.includes(name)) throw new Error(`main profile missing tool: ${name}`);
   }
-  for (const cmd of ["cynos-tools-config", "cynos-tools-browser-setup"]) {
+  for (const cmd of ["cynos-tools-config", "cynos-tools-browser-setup", "annotate"]) {
     if (!main.commands.includes(cmd)) throw new Error(`main profile missing command: ${cmd}`);
   }
 
