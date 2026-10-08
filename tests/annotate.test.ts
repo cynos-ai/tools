@@ -280,6 +280,13 @@ describe("annotate overlay source", () => {
     expect(overlaySource).toContain("note-added");
     expect(overlaySource).toContain("captureNoteSnapshot");
   });
+
+  it("supports dragging the panel by its header with a persisted position", () => {
+    expect(overlaySource).toContain("makePanelDraggable");
+    expect(overlaySource).toContain("setPointerCapture");
+    expect(overlaySource).toContain("cynosAnnotatePanelPos");
+    expect(overlaySource).toContain("restorePanelPos");
+  });
 });
 
 describe("annotate config", () => {

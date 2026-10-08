@@ -28,7 +28,7 @@
 (function () {
   "use strict";
 
-  var VERSION = 4;
+  var VERSION = 5;
   var MAX_NOTES = 100;
   var MIN_REGION_SIZE = 4;
   var TEXT_LIMITS = { selector: 1000, comment: 2000, textPreview: 300, attrValue: 200, attrCount: 40, styleCount: 30 };
@@ -154,6 +154,7 @@
   var hoverEl = null;
   var noteLimitToastUntil = 0;
   var lastActivity = Date.now(); // any interaction extends the server-side deadline
+  var panelDrag = null;         // { startX, startY, origLeft, origTop } — header drag state
 
   function teardown() {
     if (sweepTimer) { clearInterval(sweepTimer); sweepTimer = null; }
@@ -421,6 +422,8 @@
     ".ca-pop .ca-hintk { color: #6b7280; font-size: 10px; margin-top: 4px; }",
     "#ca-panel { position: fixed; top: 12px; right: 12px; width: 300px; max-height: calc(100vh - 24px); display: flex; flex-direction: column; background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 10px; box-shadow: 0 10px 30px rgba(0,0,0,.5); pointer-events: auto; }",
     "#ca-panel.hidden { display: none; }",
+    ".ca-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #374151; cursor: move; user-select: none; -webkit-user-select: none; touch-action: none; }",
+    ".ca-head .ca-btn { cursor: pointer; touch-action: auto; }",
     ".ca-head { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #374151; }",
     ".ca-head .ca-title { font-weight: 700; font-size: 12px; flex: 1; }",
     ".ca-head .ca-count { background: #2563eb; border-radius: 8px; padding: 0 7px; font-size: 11px; font-weight: 700; }",
@@ -511,6 +514,7 @@
     closeBtn.addEventListener("click", closeAll);
     head.appendChild(closeBtn);
     panel.appendChild(head);
+    makePanelDraggable(head);
 
     // Primary trigger: page stays interactive until this is pressed.
     var toggleWrap = el("div", "ca-toggle");
@@ -579,12 +583,68 @@
     renderCards();
     setMode("region");
     setAnnotating(false);
+    restorePanelPos();
   }
 
   function setPanelHidden(hidden) {
     els.panel.classList.toggle("hidden", hidden);
     els.pill.style.display = hidden ? "block" : "none";
     updatePill();
+  }
+
+  // ---------- panel dragging (header is the handle) ----------
+  var PANEL_POS_KEY = "cynosAnnotatePanelPos";
+
+  function savePanelPos() {
+    try {
+      var rect = els.panel.getBoundingClientRect();
+      sessionStorage.setItem(PANEL_POS_KEY, JSON.stringify({ left: Math.round(rect.left), top: Math.round(rect.top) }));
+    } catch (e) { /* storage unavailable */ }
+  }
+
+  // Clamp so the header stays reachable: the panel may partially leave the
+  // viewport, but ~80px of width and the header row always remain visible.
+  function movePanel(left, top) {
+    var rect = els.panel.getBoundingClientRect();
+    left = Math.max(80 - rect.width, Math.min(window.innerWidth - 80, left));
+    top = Math.max(8, Math.min(window.innerHeight - 48, top));
+    els.panel.style.right = "auto";
+    els.panel.style.left = Math.round(left) + "px";
+    els.panel.style.top = Math.round(top) + "px";
+  }
+
+  function restorePanelPos() {
+    try {
+      var raw = sessionStorage.getItem(PANEL_POS_KEY);
+      if (!raw) return;
+      var pos = JSON.parse(raw);
+      if (typeof pos.left === "number" && typeof pos.top === "number") movePanel(pos.left, pos.top);
+    } catch (e) { /* ignore */ }
+  }
+
+  function makePanelDraggable(head) {
+    head.addEventListener("pointerdown", function (ev) {
+      if (ev.button !== 0) return;
+      if (ev.target && ev.target.closest && ev.target.closest("button")) return; // buttons stay clickable
+      var rect = els.panel.getBoundingClientRect();
+      panelDrag = { startX: ev.clientX, startY: ev.clientY, origLeft: rect.left, origTop: rect.top };
+      markActivity();
+      try { head.setPointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+      ev.preventDefault();
+    });
+    head.addEventListener("pointermove", function (ev) {
+      if (!panelDrag) return;
+      movePanel(panelDrag.origLeft + (ev.clientX - panelDrag.startX), panelDrag.origTop + (ev.clientY - panelDrag.startY));
+      markActivity();
+    });
+    var endDrag = function (ev) {
+      if (!panelDrag) return;
+      panelDrag = null;
+      try { head.releasePointerCapture(ev.pointerId); } catch (e) { /* ignore */ }
+      savePanelPos();
+    };
+    head.addEventListener("pointerup", endDrag);
+    head.addEventListener("pointercancel", endDrag);
   }
 
   function updatePill() {
