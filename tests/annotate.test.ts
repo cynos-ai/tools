@@ -2,7 +2,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { formatAnnotateReport, normalizeAnnotatePayload } from "../extensions/browser/annotate-report";
+import { formatAnnotateReport, normalizeAnnotatePayload, normalizeAnnotatePages } from "../extensions/browser/annotate-report";
 import { getBrowserConfig, readConfig, writeUserConfig } from "../extensions/config/store";
 // vitest supports `?raw` natively; the same import the annotate command uses.
 import overlaySource from "../extensions/browser/annotate-overlay.js?raw";
@@ -109,13 +109,59 @@ describe("annotate/normalizeAnnotatePayload", () => {
     const { payload } = normalizeAnnotatePayload({ url: "http://localhost:3000", notes: [note] });
     expect(payload.notes[0].attributes).toEqual({ type: "submit" });
   });
+
+  it("normalizes per-page grouping and flattens notes", () => {
+    const { payload, droppedNotes } = normalizeAnnotatePayload({
+      url: "http://localhost:3000/page-2",
+      title: "Page 2",
+      context: "多页批注",
+      pages: [
+        {
+          url: "http://localhost:3000/page-1",
+          title: "Page 1",
+          notes: [validNote({ n: 1 })],
+        },
+        {
+          url: "http://localhost:3000/page-2",
+          title: "Page 2",
+          notes: [validNote({ n: 2, selector: "#other", id: "other" }), { junk: true }],
+        },
+        { notes: [] },
+      ],
+      notes: [],
+    });
+    expect(droppedNotes).toBe(1);
+    expect(payload.pages).toHaveLength(2);
+    expect(payload.pages![0].url).toBe("http://localhost:3000/page-1");
+    expect(payload.pages![1].notes).toHaveLength(1);
+    expect(payload.notes).toHaveLength(2);
+    expect(payload.notes[0].n).toBe(1);
+    expect(payload.notes[1].n).toBe(2);
+  });
+
+  it("synthesizes a single page from flat notes when pages are absent", () => {
+    const { payload } = normalizeAnnotatePayload({ url: "http://localhost:3000", notes: [validNote()] });
+    expect(payload.pages).toHaveLength(1);
+    expect(payload.pages![0].notes[0].selector).toBe("#submit-btn");
+  });
+
+  it("normalizes server-side stash arrays defensively", () => {
+    const { pages, droppedNotes } = normalizeAnnotatePages([
+      { url: "http://localhost:3000/a", title: "A", notes: [validNote({ n: 3 })] },
+      null,
+      { url: "http://localhost:3000/b", notes: [{ junk: true }] },
+    ]);
+    expect(pages).toHaveLength(1);
+    expect(pages[0].notes[0].n).toBe(3);
+    expect(droppedNotes).toBe(1);
+    expect(normalizeAnnotatePages("junk")).toEqual({ pages: [], droppedNotes: 0 });
+  });
 });
 
 describe("annotate/formatAnnotateReport", () => {
   const evidence = {
     dir: ".cynos/annotate-test",
-    viewportScreenshot: ".cynos/annotate-test/viewport.png",
-    overviewScreenshot: ".cynos/annotate-test/page.png",
+    viewportScreenshot: ".cynos/annotate-test/viewport-r1.png",
     noteScreenshots: [".cynos/annotate-test/note-1.png"],
   };
 
@@ -137,8 +183,7 @@ describe("annotate/formatAnnotateReport", () => {
     expect(report).toContain('- Comment: Make this blue with rounded corners');
     expect(report).toContain("- Accessibility: role=button, name=Submit, focusable");
     expect(report).toContain(".cynos/annotate-test/note-1.png");
-    expect(report).toContain("viewport.png");
-    expect(report).toContain("page.png");
+    expect(report).toContain("viewport-r1.png");
   });
 
   it("renders region notes with document coords and center element", () => {
@@ -176,7 +221,26 @@ describe("annotate/formatAnnotateReport", () => {
     const { payload } = normalizeAnnotatePayload({ url: "http://localhost:3000", notes: [validNote({ removed: true })] });
     const report = formatAnnotateReport(payload, { dir: ".", noteScreenshots: [undefined] });
     expect(report).toContain("removed from DOM since selection");
-    expect(report).toContain("Screenshot: unavailable (element removed or selector no longer resolved)");
+    expect(report).toContain("Screenshot: unavailable");
+  });
+
+  it("groups notes under page sections in multi-page reports", () => {
+    const { payload } = normalizeAnnotatePayload({
+      url: "http://localhost:3000/b",
+      title: "B",
+      context: "ctx",
+      pages: [
+        { url: "http://localhost:3000/a", title: "A", notes: [validNote({ n: 1 })] },
+        { url: "http://localhost:3000/b", title: "B", notes: [validNote({ n: 2, selector: "#b", id: "b" })] },
+      ],
+      notes: [],
+    });
+    const report = formatAnnotateReport(payload, { dir: ".", noteScreenshots: [undefined, undefined] });
+    expect(report).toContain("(across 2 pages)");
+    expect(report).toContain("### Page 1: A");
+    expect(report).toContain("### Page 2: B");
+    expect(report).toContain("- URL: http://localhost:3000/a");
+    expect(report.indexOf("### 1. ")).toBeLessThan(report.indexOf("### 2. "));
   });
 });
 
@@ -186,7 +250,7 @@ describe("annotate overlay source", () => {
     expect(overlaySource).toContain("install");
     expect(overlaySource).toContain("teardown");
     expect(overlaySource).toContain("state");
-    expect(overlaySource).toContain("__cynosAnnotateSubmit");
+    expect(overlaySource).toContain("__cynosAnnotateEvent");
     expect(overlaySource).toContain("cancelled");
     expect(overlaySource).toContain("uiLang");
   });
@@ -202,6 +266,19 @@ describe("annotate overlay source", () => {
     const code = overlaySource.replace(/^\s*\/\/.*$/gm, "").trimStart();
     expect(code.startsWith("(function")).toBe(true);
     expect(overlaySource).toContain("window.__cynosAnnotate.teardown()");
+  });
+
+  it("keeps the overlay alive after submit and supports stash/restore", () => {
+    // Submit clears notes but must not tear the overlay down.
+    expect(overlaySource).toContain("function resetRound()");
+    expect(overlaySource).not.toContain("function finish()");
+    // SPA page switching stashes notes; the host can restore them.
+    expect(overlaySource).toContain("stashCurrentPage");
+    expect(overlaySource).toContain("restoreStash");
+    expect(overlaySource).toContain("page-stash");
+    // Note creation screenshots via an awaited binding (overlay hides shapes).
+    expect(overlaySource).toContain("note-added");
+    expect(overlaySource).toContain("captureNoteSnapshot");
   });
 });
 

@@ -6,16 +6,29 @@
 //   2. Annotation mode (region default): drag a rectangle, type a comment.
 //      Element mode: click an HTML element for selector-level context.
 //   3. Bottom bar holds the overall context + "一起发送" (send all) which
-//      serializes every note through window.__cynosAnnotateSubmit.
+//      serializes every note through window.__cynosAnnotateEvent.
+//
+// Session semantics (v4):
+//   - Screenshots are captured at NOTE-CREATION time: the overlay hides its
+//     shapes, awaits the note-added binding (server screenshots the region /
+//     element), then restores the UI. Crops are always what the user saw.
+//   - SPA navigation (URL change) auto-stashes the current page's notes into
+//     stashedPages and clears them from the page — no stale boxes. Stashed
+//     pages ride along in the next submit payload.
+//   - Submit does NOT tear the overlay down. Notes are cleared, the panel
+//     stays, and the user can keep annotating; the host forwards further
+//     submits to the conversation automatically. "✕" closes the overlay for
+//     good; "取消" just clears unsent notes.
 //
 // Everything renders inside a shadow root (style-isolated from the page).
-// Public API on window.__cynosAnnotate: { install, state, teardown, version }.
+// Public API on window.__cynosAnnotate:
+//   { install, state, teardown, restoreStash, version }.
 // This file is imported with a `?raw` suffix and evaluated via page.evaluate.
 
 (function () {
   "use strict";
 
-  var VERSION = 3;
+  var VERSION = 4;
   var MAX_NOTES = 100;
   var MIN_REGION_SIZE = 4;
   var TEXT_LIMITS = { selector: 1000, comment: 2000, textPreview: 300, attrValue: 200, attrCount: 40, styleCount: 30 };
@@ -34,6 +47,8 @@
       stopTitle: "退出标注模式，恢复正常操作页面（已添加的批注保留）",
       hide: "收起",
       hideTitle: "收起面板（Esc 切换）",
+      close: "✕",
+      closeTitle: "关闭标注并移除页面组件（之后需重新运行 /annotate）",
       pill: "标注",
       pillTitle: "打开标注面板",
       region: "▭ 区域",
@@ -43,9 +58,10 @@
       contextLabel: "整体需求（要让 agent 修什么？）",
       contextPh: "例如：修复定价卡片的间距",
       clear: "清空",
+      clearTitle: "清空未发送的批注（组件保留，可继续标注）",
       cancel: "取消",
       sendAll: "一起发送",
-      footHint: "Esc 收起 · Ctrl+Enter 发送",
+      footHint: "Esc 收起 · Ctrl+Enter 发送 · 切换页面会自动暂存本页批注",
       hintIdle: "点击「开始标注」后在页面上拖出矩形区域（或切换到元素模式点击元素）。",
       hintOn: "在页面上拖拽一个矩形区域，然后输入批注。",
       hintElement: "标注中——点击任意元素添加批注。",
@@ -65,6 +81,10 @@
       regionClickEdit: "点击编辑",
       elementBadge: "（元素）",
       scrollTitle: "点击滚动到视野",
+      sentToast: "已发送 {N} 条批注 ✓ 可继续标注、切换页面，再次发送会自动送达",
+      stashToast: "已暂存本页 {N} 条批注（随下一次发送一起提交）",
+      clearedToast: "已清空未发送的批注",
+      dropPage: "丢弃此页的暂存批注",
     },
     en: {
       title: "Annotate",
@@ -74,6 +94,8 @@
       stopTitle: "Leave annotation mode and interact with the page normally (notes are kept)",
       hide: "Hide",
       hideTitle: "Hide panel (Esc toggles)",
+      close: "✕",
+      closeTitle: "Close annotate and remove the overlay (rerun /annotate to start again)",
       pill: "Annotate",
       pillTitle: "Open the annotation panel",
       region: "▭ Region",
@@ -83,9 +105,10 @@
       contextLabel: "Overall context (what should the agent fix?)",
       contextPh: "e.g. Fix spacing on the pricing cards",
       clear: "Clear",
+      clearTitle: "Clear unsent notes (overlay stays, keep annotating)",
       cancel: "Cancel",
       sendAll: "Send all",
-      footHint: "Esc hide · Ctrl+Enter send",
+      footHint: "Esc hide · Ctrl+Enter send · switching pages auto-stashes this page's notes",
       hintIdle: "Click「Start annotating」, then drag a rectangle on the page (or switch to element mode).",
       hintOn: "Drag a rectangle on the page, then type a comment.",
       hintElement: "Annotating — click any element to add a note.",
@@ -105,6 +128,10 @@
       regionClickEdit: "click to edit",
       elementBadge: " (element)",
       scrollTitle: "Click to scroll into view",
+      sentToast: "Sent {N} note(s) ✓ keep annotating or switch pages — the next send is delivered too",
+      stashToast: "Stashed {N} note(s) from this page (included in the next send)",
+      clearedToast: "Cleared unsent notes",
+      dropPage: "Drop this stashed page",
     },
   };
   var LANG = "zh";
@@ -113,12 +140,14 @@
   // ---------- state ----------
   var host = null, root = null, shadow = null;
   var els = {};
-  var regions = [];   // { n, doc:{x,y,w,h}, comment, center }
-  var elements = [];  // { n, el, comment, data }
+  var regions = [];        // { n, doc:{x,y,w,h}, comment, center }
+  var elements = [];       // { n, el, comment, data }
+  var stashedPages = [];   // { url, title, notes: serialized[] } — pages left via SPA navigation
+  var lastUrl = null;      // navigation detection (sweep compares location.href)
+  var lastTitle = "";
   var nextNoteId = 1;
   var mode = "region";     // "region" | "element" (active annotation kind)
   var annotating = false;  // Codex-style toggle: page is interactive when false
-  var submitted = false;
   var sweepTimer = null;
   var drag = null;         // { startX, startY }
   var popover = null;      // open comment editor
@@ -135,10 +164,38 @@
     window.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("resize", scheduleUpdate, true);
     window.removeEventListener("scroll", scheduleUpdate, true);
+    window.removeEventListener("pagehide", onPageHide);
     if (host && host.parentNode) host.parentNode.removeChild(host);
     host = null; root = null; shadow = null; els = {};
-    regions = []; elements = []; drag = null; popover = null; hoverEl = null;
+    regions = []; elements = []; stashedPages = [];
+    drag = null; popover = null; hoverEl = null;
     try { delete window.__cynosAnnotate; } catch (e) { window.__cynosAnnotate = undefined; }
+  }
+
+  // ---------- host binding ----------
+  // Single event channel to the host. Fire-and-forget for most events;
+  // "note-added" awaits the returned promise so the server can screenshot
+  // before the overlay shapes are shown again.
+  function sendEvent(payload) {
+    var send = window.__cynosAnnotateEvent;
+    if (typeof send === "function") {
+      try { return send(payload); } catch (e) { return null; }
+    }
+    return null;
+  }
+
+  // Hide shapes (boxes/badges), let the host capture the crop, then restore.
+  function captureNoteSnapshot(note) {
+    var prev = els.shapes ? els.shapes.style.display : "";
+    if (els.shapes) els.shapes.style.display = "none";
+    var p = sendEvent({ type: "note-added", url: location.href, title: document.title, note: note });
+    var done = (p && typeof p.then === "function")
+      ? Promise.race([p, new Promise(function (res) { setTimeout(res, 4000); })])
+      : Promise.resolve();
+    return done.then(
+      function () { if (els.shapes) els.shapes.style.display = prev; },
+      function () { if (els.shapes) els.shapes.style.display = prev; }
+    );
   }
 
   // ---------- helpers ----------
@@ -314,6 +371,10 @@
   }
 
   function totalNotes() { return regions.length + elements.length; }
+  function stashedNotesCount() {
+    return stashedPages.reduce(function (s, p) { return s + p.notes.length; }, 0);
+  }
+  function pendingCount() { return totalNotes() + stashedNotesCount(); }
 
   function markActivity() { lastActivity = Date.now(); }
 
@@ -321,11 +382,11 @@
     if (!els.toast) return;
     els.toast.textContent = msg;
     els.toast.style.display = "block";
-    setTimeout(function () { els.toast.style.display = "none"; }, 2200);
+    setTimeout(function () { els.toast.style.display = "none"; }, 2600);
   }
 
   function noteLimitReached() {
-    if (totalNotes() >= MAX_NOTES) {
+    if (pendingCount() >= MAX_NOTES) {
       if (Date.now() > noteLimitToastUntil) {
         noteLimitToastUntil = Date.now() + 2500;
         toast(t("limitToast"));
@@ -379,6 +440,8 @@
     ".ca-context { padding: 8px 10px 0; }",
     ".ca-context textarea { width: 100%; min-height: 34px; background: #1f2937; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 5px 7px; resize: vertical; }",
     ".ca-context .ca-label { color: #9ca3af; font-size: 11px; margin-bottom: 2px; display: block; }",
+    ".ca-stash-row { display: flex; align-items: center; gap: 6px; background: #0f172a; border: 1px dashed #374151; border-radius: 6px; padding: 4px 6px; }",
+    ".ca-stash-row .ca-stash-label { flex: 1; color: #93c5fd; font-size: 10.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }",
     ".ca-note { background: #1f2937; border: 1px solid #374151; border-radius: 8px; padding: 6px 8px; }",
     ".ca-note .ca-note-head { display: flex; align-items: center; gap: 5px; margin-bottom: 4px; }",
     ".ca-note .ca-note-head .ca-num { background: #2563eb; color: #fff; border-radius: 8px; min-width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; padding: 0 5px; }",
@@ -392,7 +455,7 @@
     ".ca-sendall:hover { background: #1d4ed8; }",
     "#ca-pill { position: fixed; bottom: 14px; right: 14px; z-index: 2147483646; background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 999px; padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer; pointer-events: auto; box-shadow: 0 6px 18px rgba(0,0,0,.45); display: none; }",
     "#ca-pill .ca-pill-count { color: #93c5fd; }",
-    "#ca-toast { position: fixed; bottom: 52px; left: 50%; transform: translateX(-50%); background: #111827; color: #fbbf24; border: 1px solid #374151; padding: 6px 12px; border-radius: 8px; display: none; pointer-events: auto; }",
+    "#ca-toast { position: fixed; bottom: 52px; left: 50%; transform: translateX(-50%); background: #111827; color: #fbbf24; border: 1px solid #374151; padding: 6px 12px; border-radius: 8px; display: none; pointer-events: auto; max-width: 80vw; }",
   ].join("\n");
 
   function el(tag, cls, text) {
@@ -443,6 +506,10 @@
     hideBtn.title = t("hideTitle");
     hideBtn.addEventListener("click", function () { setPanelHidden(true); });
     head.appendChild(hideBtn);
+    var closeBtn = el("button", "ca-btn", t("close"));
+    closeBtn.title = t("closeTitle");
+    closeBtn.addEventListener("click", closeAll);
+    head.appendChild(closeBtn);
     panel.appendChild(head);
 
     // Primary trigger: page stays interactive until this is pressed.
@@ -484,12 +551,15 @@
     sendbar.appendChild(ctxWrap);
     var sendRow = el("div", "ca-send-row");
     var clearBtn = el("button", "ca-btn", t("clear"));
+    clearBtn.title = t("clearTitle");
     clearBtn.addEventListener("click", function () {
-      regions = []; elements = []; els.context.value = "";
+      regions = []; elements = []; stashedPages = []; els.context.value = "";
+      sendEvent({ type: "page-stash", pages: stashedPages });
       renderCards(); updateShapes();
     });
     sendRow.appendChild(clearBtn);
     var cancelBtn = el("button", "ca-btn", t("cancel"));
+    cancelBtn.title = t("clearTitle");
     cancelBtn.addEventListener("click", cancel);
     sendRow.appendChild(cancelBtn);
     els.sendAllBtn = el("button", "ca-sendall", t("sendAll") + " (0)");
@@ -521,7 +591,7 @@
     if (!els.pill) return;
     els.pill.textContent = "";
     els.pill.appendChild(document.createTextNode(t("pill") + " "));
-    var c = el("span", "ca-pill-count", "(" + totalNotes() + ")");
+    var c = el("span", "ca-pill-count", "(" + pendingCount() + ")");
     els.pill.appendChild(c);
   }
 
@@ -692,7 +762,6 @@
 
   // ---------- picking ----------
   function onPointerDown(e) {
-    if (submitted) return;
     markActivity();
     if (!annotating || mode !== "region") return;
     if (isOwnUi(e.target) || e.button !== 0) return;
@@ -709,7 +778,6 @@
   }
 
   function onPointerMove(e) {
-    if (submitted) return;
     if (!annotating) return;
     markActivity();
     if (mode === "element") {
@@ -731,7 +799,6 @@
   }
 
   function onPointerUp(e) {
-    if (submitted) return;
     markActivity();
     if (!annotating || mode !== "region" || !drag) return;
     var startX = drag.startX, startY = drag.startY;
@@ -755,11 +822,15 @@
     renderCards();
     updateShapes();
     var shape = els.badges.find(function (b) { return b.kind === "region" && b.note === region; });
-    if (shape) openPopover(region, shape.box);
+    // Screenshot the crop first (host hides shapes while capturing), then edit.
+    captureNoteSnapshot(serializeRegionNote(region)).then(function () {
+      var liveShape = els.badges.find(function (b) { return b.kind === "region" && b.note === region; });
+      if (liveShape) openPopover(region, liveShape.box);
+    });
   }
 
   function onClickCapture(e) {
-    if (submitted || !annotating || mode !== "element") return;
+    if (!annotating || mode !== "element") return;
     if (isOwnUi(e.target)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -773,8 +844,89 @@
     elements.push(note);
     renderCards();
     updateShapes();
+    captureNoteSnapshot(serializeElementNote(note, true));
   }
 
+  // ---------- serialization ----------
+  function serializeRegionNote(r) {
+    return {
+      n: r.n,
+      kind: "region",
+      comment: r.comment ? r.comment.slice(0, TEXT_LIMITS.comment) : undefined,
+      rect: {
+        x: 0, y: 0, width: r.doc.w, height: r.doc.h,
+        docX: r.doc.x, docY: r.doc.y, docWidth: r.doc.w, docHeight: r.doc.h,
+      },
+      center: r.center || undefined,
+    };
+  }
+
+  // live=true re-describes connected elements (submit time, current page);
+  // live=false uses the data captured at creation (stash/pagehide time).
+  function serializeElementNote(eNote, live) {
+    var d = eNote.data;
+    var removed;
+    if (live) {
+      var liveData = null;
+      try { liveData = eNote.el && eNote.el.isConnected ? describe(eNote.el) : null; } catch (err) { liveData = null; }
+      if (liveData) d = liveData;
+      else removed = true;
+    }
+    return {
+      n: eNote.n,
+      kind: "element",
+      selector: d.selector,
+      nth: d.nth,
+      tag: d.tag,
+      id: d.id,
+      classes: d.classes,
+      textPreview: d.textPreview,
+      comment: eNote.comment ? eNote.comment.slice(0, TEXT_LIMITS.comment) : undefined,
+      removed: removed || undefined,
+      rect: d.rect,
+      box: d.box,
+      styles: d.styles,
+      attributes: d.attributes,
+      a11y: d.a11y,
+    };
+  }
+
+  function serializeCurrentNotes(live) {
+    var out = [];
+    regions.forEach(function (r) { out.push(serializeRegionNote(r)); });
+    elements.forEach(function (eNote) { out.push(serializeElementNote(eNote, live)); });
+    out.sort(function (a, b) { return a.n - b.n; });
+    return out;
+  }
+
+  // ---------- page switching (SPA) ----------
+  function stashCurrentPage() {
+    var prevUrl = lastUrl, prevTitle = lastTitle;
+    lastUrl = location.href;
+    lastTitle = document.title;
+    closePopover(false);
+    els.rubber.style.display = "none";
+    var notes = serializeCurrentNotes(false);
+    regions = []; elements = [];
+    if (notes.length > 0) {
+      stashedPages.push({ url: String(prevUrl || ""), title: String(prevTitle || ""), notes: notes });
+      sendEvent({ type: "page-stash", pages: stashedPages });
+      toast(t("stashToast").replace("{N}", String(notes.length)));
+    }
+    renderCards();
+    updateShapes();
+  }
+
+  // Best-effort: flush notes to the host before a hard navigation unloads us.
+  function onPageHide() {
+    var pages = stashedPages.map(function (p) { return { url: p.url, title: p.title, notes: p.notes }; });
+    var notes = serializeCurrentNotes(false);
+    if (notes.length > 0) pages.push({ url: String(lastUrl || location.href), title: String(lastTitle || document.title), notes: notes });
+    var any = pages.some(function (p) { return p.notes.length > 0; });
+    if (any) sendEvent({ type: "page-stash", pages: pages });
+  }
+
+  // ---------- cards ----------
   function describeMeta(d) {
     var parts = [];
     if (d.rect && d.rect.width != null) parts.push(d.rect.width + "×" + d.rect.height);
@@ -783,12 +935,32 @@
     return parts.join(" · ") || null;
   }
 
+  function stashRow(page, index) {
+    var row = el("div", "ca-stash-row");
+    var path = String(page.url || "").replace(/^[a-z]+:\/\/[^/]+/i, "") || "/";
+    var label = el("span", "ca-stash-label", "📄 " + page.notes.length + " · " + path);
+    label.title = (page.title ? page.title + "\n" : "") + page.url;
+    row.appendChild(label);
+    var del = el("button", "ca-btn", "×");
+    del.title = t("dropPage");
+    del.addEventListener("click", function () {
+      stashedPages.splice(index, 1);
+      sendEvent({ type: "page-stash", pages: stashedPages });
+      renderCards();
+    });
+    row.appendChild(del);
+    return row;
+  }
+
   function renderCards() {
     if (!els.cards) return;
     markActivity();
     els.cards.innerHTML = "";
-    var total = regions.length + elements.length;
-    if (total === 0) {
+    stashedPages.forEach(function (p, i) {
+      els.cards.appendChild(stashRow(p, i));
+    });
+    var total = totalNotes();
+    if (total === 0 && stashedPages.length === 0) {
       var hintText = !annotating ? t("hintIdle") : (mode === "region" ? t("hintOn") : t("hintElement"));
       els.cards.appendChild(el("div", "ca-meta", hintText));
     }
@@ -798,8 +970,8 @@
     elements.forEach(function (eNote) {
       els.cards.appendChild(elementRow(eNote));
     });
-    els.count.textContent = String(total);
-    if (els.sendAllBtn) els.sendAllBtn.textContent = t("sendAll") + " (" + total + ")";
+    els.count.textContent = String(pendingCount());
+    if (els.sendAllBtn) els.sendAllBtn.textContent = t("sendAll") + " (" + pendingCount() + ")";
     updatePill();
     if (els.body) els.body.scrollTop = els.body.scrollHeight;
   }
@@ -854,6 +1026,7 @@
         eNote.el = eNote.el.parentElement;
         eNote.data = describe(eNote.el);
         renderCards(); updateShapes();
+        captureNoteSnapshot(serializeElementNote(eNote, true));
       }
     });
     head.appendChild(parentBtn);
@@ -877,7 +1050,6 @@
 
   // ---------- keyboard ----------
   function onKeyDown(e) {
-    if (submitted) return;
     if (isOwnUi(e.target)) return;
     markActivity();
     if (e.key === "Escape") {
@@ -890,80 +1062,64 @@
     }
   }
 
-  // ---------- submit ----------
+  // ---------- submit / cancel / close ----------
   function serialize() {
-    var out = [];
-    regions.forEach(function (r) {
-      out.push({
-        n: r.n,
-        kind: "region",
-        comment: r.comment ? r.comment.slice(0, TEXT_LIMITS.comment) : undefined,
-        rect: {
-          x: 0, y: 0, width: r.doc.w, height: r.doc.h,
-          docX: r.doc.x, docY: r.doc.y, docWidth: r.doc.w, docHeight: r.doc.h,
-        },
-        center: r.center || undefined,
-      });
+    var pages = stashedPages.map(function (p) {
+      return { url: p.url, title: p.title || undefined, notes: p.notes };
     });
-    elements.forEach(function (eNote) {
-      var live = null;
-      try { live = eNote.el.isConnected ? describe(eNote.el) : null; } catch (e) { live = null; }
-      var d = live || eNote.data;
-      out.push({
-        n: eNote.n,
-        kind: "element",
-        selector: d.selector,
-        nth: d.nth,
-        tag: d.tag,
-        id: d.id,
-        classes: d.classes,
-        textPreview: d.textPreview,
-        comment: eNote.comment ? eNote.comment.slice(0, TEXT_LIMITS.comment) : undefined,
-        removed: !live || undefined,
-        rect: d.rect,
-        box: d.box,
-        styles: d.styles,
-        attributes: d.attributes,
-        a11y: d.a11y,
-      });
+    pages.push({ url: location.href, title: document.title, notes: serializeCurrentNotes(true) });
+    var flat = [];
+    pages.forEach(function (p) {
+      for (var i = 0; i < p.notes.length; i++) flat.push(p.notes[i]);
     });
-    out.sort(function (a, b) { return a.n - b.n; });
     return {
+      type: "submit",
       url: location.href,
       title: document.title,
       userAgent: navigator.userAgent,
       viewport: { width: window.innerWidth, height: window.innerHeight },
       context: els.context ? els.context.value.slice(0, TEXT_LIMITS.comment) : "",
-      notes: out,
+      cancelled: false,
+      pages: pages,
+      notes: flat,
     };
   }
 
-  function finish() {
-    submitted = true;
-    teardown();
+  function resetRound() {
+    stashedPages = []; regions = []; elements = [];
+    closePopover(false);
+    if (els.context) els.context.value = "";
+    renderCards();
+    updateShapes();
   }
 
+  // Submit does not tear the overlay down: notes are cleared, the panel stays,
+  // and the host delivers further rounds automatically.
   function submit() {
+    var count = pendingCount();
+    if (count === 0) return;
     var payload = serialize();
-    payload.cancelled = false;
-    var send = window.__cynosAnnotateSubmit;
-    if (typeof send === "function") {
-      try { send(payload); } catch (e) { /* host gone; nothing to do */ }
-    }
-    finish();
+    sendEvent(payload);
+    resetRound();
+    toast(t("sentToast").replace("{N}", String(count)));
   }
 
   function cancel() {
-    var send = window.__cynosAnnotateSubmit;
-    if (typeof send === "function") {
-      try { send({ cancelled: true }); } catch (e) { /* host gone */ }
-    }
-    finish();
+    sendEvent({ type: "cancel" });
+    resetRound();
+    toast(t("clearedToast"));
+  }
+
+  function closeAll() {
+    sendEvent({ type: "close" });
+    teardown();
   }
 
   // ---------- install ----------
   function install(opts) {
     LANG = opts && opts.uiLang === "en" ? "en" : "zh";
+    lastUrl = location.href;
+    lastTitle = document.title;
     buildUi();
     window.addEventListener("pointermove", onPointerMove, true);
     window.addEventListener("pointerdown", onPointerDown, true);
@@ -972,7 +1128,11 @@
     window.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("resize", scheduleUpdate, true);
     window.addEventListener("scroll", scheduleUpdate, true);
-    sweepTimer = setInterval(positionShapes, 250);
+    window.addEventListener("pagehide", onPageHide);
+    sweepTimer = setInterval(function () {
+      if (lastUrl !== null && location.href !== lastUrl) stashCurrentPage();
+      positionShapes();
+    }, 250);
   }
 
   var rafPending = false;
@@ -986,13 +1146,28 @@
     version: VERSION,
     install: install,
     teardown: teardown,
+    // Restore stashed pages held server-side (e.g. after a hard navigation
+    // wiped a previous overlay before its notes were submitted).
+    restoreStash: function (pages) {
+      if (!Array.isArray(pages)) return;
+      stashedPages = pages
+        .filter(function (p) { return p && typeof p === "object" && Array.isArray(p.notes); })
+        .map(function (p) {
+          return { url: String(p.url || ""), title: String(p.title || ""), notes: p.notes };
+        });
+      renderCards();
+      updateShapes();
+    },
     state: function () {
       return {
-        count: regions.length + elements.length,
+        version: VERSION,
+        count: totalNotes(),
+        pages: stashedPages.length,
+        total: pendingCount(),
         annotating: annotating,
         mode: mode,
-        submitted: submitted,
         lastActivity: lastActivity,
+        url: location.href,
       };
     },
   };

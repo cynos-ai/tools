@@ -133,11 +133,16 @@ Workflow: `cynos_browser_navigate` → `cynos_browser_inspect(action="snapshot")
 
 1. **The page stays fully interactive.** Press **开始标注 / Start annotating** to enter annotation mode; press **完成标注 / Done** at any time to go back to normal interaction (notes are kept).
 2. **Region mode (default)**: drag a rectangle, type a comment in the popover, repeat. **Element mode**: click an HTML element to attach selector-level context. `Esc` exits annotating mode first, then hides the panel.
-3. The **bottom bar** holds the overall context plus **一起发送 / Send all (N)** — one submission serializes every note (regions with document-space rectangles + per-region crops, elements with selectors/box-model/a11y/styles), screenshots the viewport with badges and the clean full page, and delivers the Markdown report (command: as a user message; tool: as the tool result the agent acts on immediately).
+3. **Per-note screenshots are captured the moment a note is created** (the overlay briefly hides its shapes), so crops always show what you saw — even after the page changes.
+4. **Switching pages (SPA routing) auto-stashes** the current page's notes: the boxes are cleared and the stash rides along with the next send; stashed pages are listed at the top of the panel (drop them with ✕).
+5. The **bottom bar** holds the overall context plus **一起发送 / Send all (N)** — one submission serializes every note across all stashed pages (regions with document-space rectangles + per-region crops, elements with selectors/box-model/a11y/styles), captures the viewport with badges, and delivers the Markdown report (command: as a user message; tool: as the tool result the agent acts on immediately).
+6. **Submitting does not close the session.** Notes are cleared, the panel stays, and a background watcher forwards every later 一起发送 to the conversation automatically as a new message — no need to rerun `/annotate` between rounds. **取消** just clears unsent notes; the **✕** button removes the overlay for good. After 1 hour of inactivity the overlay removes itself.
 
-The overlay UI is **Chinese by default**; it follows the system locale automatically (`LANG`/`LC_ALL`), overridable via `browser.annotate.uiLanguage` (`"zh" | "en" | "auto"`). Run `/annotate` again anytime for another round; the browser session is reused. Extra options: `browser.annotate.timeoutMs` (default 10 min), `browser.annotate.screenshots`, and `browser.args` for extra Chromium launch flags.
+Routing: each pi session gets its own isolated browser window, and a window's submits always arrive in the session that opened it — several pi sessions never see each other's annotations. One annotate flow can wait per session at a time.
 
-Limitations: annotations happen in the isolated ephemeral context (no login state); notes do not survive page navigation; only the main frame is annotatable (no iframes / shadow-host piercing).
+The overlay UI is **Chinese by default**; it follows the system locale automatically (`LANG`/`LC_ALL`), overridable via `browser.annotate.uiLanguage` (`"zh" | "en" | "auto"`). Run `/annotate` again anytime to attach a new flow to the still-installed overlay (pending notes are kept). Extra options: `browser.annotate.timeoutMs` (default 10 min), `browser.annotate.screenshots`, and `browser.args` for extra Chromium launch flags.
+
+Limitations: annotations happen in the isolated ephemeral context (no login state); only the main frame is annotatable (no iframes / shadow-host piercing); a hard navigation (full reload / address-bar jump) mid-round is survived via a best-effort server-side stash of already-stashed pages, but notes on the page being unloaded at that exact moment can still be lost.
 
 ## Security notes
 

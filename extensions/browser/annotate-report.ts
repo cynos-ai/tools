@@ -50,6 +50,13 @@ export interface AnnotateNote {
   a11y?: Record<string, string | boolean>;
 }
 
+/** One annotated page. Multi-page sessions (SPA navigation) produce several. */
+export interface AnnotatePage {
+  url: string;
+  title?: string;
+  notes: AnnotateNote[];
+}
+
 export interface AnnotatePayload {
   url: string;
   title?: string;
@@ -58,6 +65,8 @@ export interface AnnotatePayload {
   context?: string;
   cancelled?: boolean;
   notes: AnnotateNote[];
+  /** Present when the payload carries per-page grouping (v4 overlay+). */
+  pages?: AnnotatePage[];
 }
 
 const STRING_FIELD_CAPS = {
@@ -222,6 +231,19 @@ export function normalizeAnnotatePayload(raw: unknown): { payload: AnnotatePaylo
       }
     : undefined;
 
+  const { pages, droppedNotes: droppedPageNotes } = normalizeAnnotatePages(obj.pages);
+  dropped += droppedPageNotes;
+  // The v4 overlay always sends both, but if a payload only carries grouping,
+  // derive the flat list from it so reports still render every note.
+  if (pages.length > 0 && notes.length === 0) {
+    for (const page of pages) {
+      for (const note of page.notes) {
+        if (notes.length >= BROWSER_ANNOTATE_MAX_NOTES) break;
+        notes.push(note);
+      }
+    }
+  }
+
   return {
     payload: {
       url: clampString(obj.url, STRING_FIELD_CAPS.url),
@@ -231,16 +253,46 @@ export function normalizeAnnotatePayload(raw: unknown): { payload: AnnotatePaylo
       context: clampString(obj.context, STRING_FIELD_CAPS.context) || undefined,
       cancelled: obj.cancelled === true,
       notes,
+      pages: pages.length > 0 ? pages : notes.length > 0 ? [{ url: clampString(obj.url, STRING_FIELD_CAPS.url), title: clampString(obj.title, STRING_FIELD_CAPS.title) || undefined, notes }] : undefined,
     },
     droppedNotes: dropped,
   };
 }
 
+/**
+ * Normalize the per-page grouping of a payload (defensive: page data is
+ * page-derived and therefore untrusted). Returns [] for missing/invalid input.
+ */
+export function normalizeAnnotatePages(raw: unknown): { pages: AnnotatePage[]; droppedNotes: number } {
+  if (!Array.isArray(raw)) return { pages: [], droppedNotes: 0 };
+  const pages: AnnotatePage[] = [];
+  let dropped = 0;
+  for (const rawPage of raw.slice(0, 20)) {
+    if (rawPage == null || typeof rawPage !== "object") continue;
+    const obj = rawPage as Record<string, unknown>;
+    const notesRaw = Array.isArray(obj.notes) ? obj.notes : [];
+    const notes: AnnotateNote[] = [];
+    for (const rawNote of notesRaw.slice(0, BROWSER_ANNOTATE_MAX_NOTES)) {
+      const note = normalizeNote(rawNote, notes.length);
+      if (note) notes.push(note);
+      else dropped++;
+    }
+    dropped += Math.max(0, notesRaw.length - BROWSER_ANNOTATE_MAX_NOTES);
+    if (notes.length === 0) continue;
+    pages.push({
+      url: clampString(obj.url, STRING_FIELD_CAPS.url),
+      title: clampString(obj.title, STRING_FIELD_CAPS.title) || undefined,
+      notes,
+    });
+  }
+  return { pages, droppedNotes: dropped };
+}
+
 export interface AnnotateEvidence {
   /** Directory (relative to cwd preferred) where evidence files live. */
   dir: string;
+  /** Submit-time viewport capture (badges visible, current page only). */
   viewportScreenshot?: string;
-  overviewScreenshot?: string;
   /** Per-note element screenshots, aligned with payload.notes indexes. */
   noteScreenshots: (string | undefined)[];
 }
@@ -269,7 +321,8 @@ export function formatAnnotateReport(payload: AnnotatePayload, evidence: Annotat
   if (payload.viewport) lines.push(`**Viewport:** ${payload.viewport.width}×${payload.viewport.height}`);
   lines.push(`**Context:** ${payload.context?.trim() || "(none provided)"}`);
   lines.push("");
-  lines.push(`**Notes:** ${payload.notes.length}`);
+  const pageCount = payload.pages?.length ?? 0;
+  lines.push(`**Notes:** ${payload.notes.length}${pageCount > 1 ? ` (across ${pageCount} pages)` : ""}`);
   if (evidence.noteScreenshots.some(Boolean)) {
     lines.push(`**Evidence dir:** ${evidence.dir}`);
   }
@@ -282,7 +335,31 @@ export function formatAnnotateReport(payload: AnnotatePayload, evidence: Annotat
     return lines.join("\n");
   }
 
-  payload.notes.forEach((note, i) => {
+  const multiPage = pageCount > 1;
+  const pages = payload.pages?.length ? payload.pages : [{ url: payload.url, title: payload.title, notes: payload.notes }];
+  let noteIndex = 0;
+  pages.forEach((page, pageIdx) => {
+    if (multiPage) {
+      lines.push("");
+      lines.push(`### Page ${pageIdx + 1}: ${page.title || page.url || "(untitled)"}`);
+      if (page.url) lines.push(`- URL: ${page.url}`);
+    }
+    page.notes.forEach((note) => {
+      renderNote(lines, note, evidence.noteScreenshots[noteIndex++]);
+    });
+  });
+
+  if (evidence.viewportScreenshot) {
+    lines.push("");
+    lines.push(`### Viewport screenshot (badges visible)`);
+    lines.push(`- ${evidence.viewportScreenshot}`);
+  }
+
+  return lines.join("\n");
+}
+
+function renderNote(lines: string[], note: AnnotateNote, shot: string | undefined): void {
+  {
     lines.push("");
     if (note.kind === "region") {
       const w = note.rect?.docWidth ?? note.rect?.width ?? 0;
@@ -323,22 +400,8 @@ export function formatAnnotateReport(payload: AnnotatePayload, evidence: Annotat
         .join(" ");
       lines.push(`- Attributes: ${attrs}`);
     }
-    const shot = evidence.noteScreenshots[i];
     if (shot) lines.push(`- ${note.kind === "region" ? "Region crop" : "Screenshot"}: ${shot}`);
-    else lines.push("- Screenshot: unavailable (element removed or selector no longer resolved)");
+    else lines.push("- Screenshot: unavailable (captured at note creation; failed or disabled for this note)");
     if (note.comment) lines.push(`- Comment: ${note.comment}`);
-  });
-
-  if (evidence.viewportScreenshot) {
-    lines.push("");
-    lines.push(`### Viewport screenshot (badges visible)`);
-    lines.push(`- ${evidence.viewportScreenshot}`);
   }
-  if (evidence.overviewScreenshot) {
-    lines.push("");
-    lines.push(`### Full-page overview (overlay removed)`);
-    lines.push(`- ${evidence.overviewScreenshot}`);
-  }
-
-  return lines.join("\n");
 }
