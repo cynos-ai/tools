@@ -108,7 +108,7 @@ function exposeEventBinding(page: Page): void {
   boundContexts.add(context);
 }
 
-function dispatchEvent(page: Page, ev: AnnotateEvent): void {
+export function dispatchEvent(page: Page, ev: AnnotateEvent): void {
   const waiters = eventWaiters.get(page);
   if (waiters && waiters.length > 0) {
     const wake = waiters.shift()!;
@@ -128,17 +128,30 @@ function dequeueEvent(page: Page): AnnotateEvent | undefined {
   return queue && queue.length > 0 ? queue.shift() : undefined;
 }
 
-function nextEvent(page: Page): Promise<AnnotateEvent> {
+// Wait for the next event. The returned cancel() MUST be called when the
+// caller stops awaiting (e.g. a poll timeout won the race): otherwise the
+// abandoned resolver stays in the waiter list and silently steals future
+// events from the real consumer (submits would never be seen).
+export function nextEvent(page: Page): { promise: Promise<AnnotateEvent>; cancel: () => void } {
   const existing = dequeueEvent(page);
-  if (existing) return Promise.resolve(existing);
-  return new Promise((resolve) => {
-    let waiters = eventWaiters.get(page);
-    if (!waiters) {
-      waiters = [];
-      eventWaiters.set(page, waiters);
-    }
-    waiters.push(resolve);
-  });
+  if (existing) return { promise: Promise.resolve(existing), cancel: () => undefined };
+  let waiters = eventWaiters.get(page);
+  if (!waiters) {
+    waiters = [];
+    eventWaiters.set(page, waiters);
+  }
+  let resolveFn: (ev: AnnotateEvent) => void = () => undefined;
+  const promise = new Promise<AnnotateEvent>((res) => { resolveFn = res; });
+  waiters.push(resolveFn);
+  return {
+    promise,
+    cancel: () => {
+      const ws = eventWaiters.get(page);
+      if (!ws) return;
+      const i = ws.indexOf(resolveFn);
+      if (i >= 0) ws.splice(i, 1);
+    },
+  };
 }
 
 // Called (and awaited by the page) whenever the overlay adds or re-targets a
@@ -431,11 +444,15 @@ export async function runAnnotateFlow(opts: AnnotateFlowOptions): Promise<Annota
     for (;;) {
       if (aborted) break;
       let ev: AnnotateEvent | undefined;
+      const pending = nextEvent(page);
       try {
-        ev = await Promise.race([nextEvent(page), sleep(1200).then(() => undefined)]);
+        ev = await Promise.race([pending.promise, sleep(1200).then(() => undefined)]);
       } catch {
         ev = undefined;
       }
+      // Drop the waiter if the poll timeout won: abandoned resolvers would
+      // steal later events (this is how "一起发送" got swallowed).
+      pending.cancel();
       if (ev) {
         deadline.value = Date.now() + timeoutMs; // any event implies activity
         const type = ev.type;
