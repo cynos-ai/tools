@@ -2,6 +2,11 @@
 
 All notable public changes to Cynos Tools are documented here.
 
+## 0.7.0
+
+- Saved annotations no longer render boxes or number badges on the page — the panel is the single place to view and edit them. A region box appears transiently only while its comment popover is open (just drawn, or re-opened from the panel), then disappears; the panel's region label scrolls to the area for editing.
+- Fix "一起发送" being swallowed: abandoned waiters from the annotate flow's poll race silently consumed submit events, so reports were never delivered until the idle timeout. Waiters are now cancelled when abandoned (regression-tested).
+
 ## 0.6.0
 
 - The annotate overlay panel can now be dragged by its header (hide/close buttons stay clickable). The position clamps to the viewport so the header always stays reachable, persists in sessionStorage, and survives page switches / overlay reinstalls.
