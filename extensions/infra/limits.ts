@@ -23,3 +23,6 @@ export const BROWSER_MAX_REF_ELEMENTS = 500;
 export const BROWSER_CONSOLE_BUFFER = 200;
 export const BROWSER_NETWORK_BUFFER = 200;
 export const BROWSER_EVAL_OUTPUT_BYTES = 50_000;
+// ---- browser annotate (/annotate) ----
+export const BROWSER_ANNOTATE_TIMEOUT_MS = 10 * 60_000;
+export const BROWSER_ANNOTATE_MAX_NOTES = 100;

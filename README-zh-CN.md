@@ -22,6 +22,7 @@
 - **网页抓取** — `cynos_fetch` 拉取公开页面的完整正文。
 - **视觉** — `cynos_vision` 用支持视觉的模型分析本地图片（截图、UI、图表、示意图）。
 - **浏览器自动化** — `cynos_browser_*` 驱动隔离浏览器：导航、交互、采集 snapshot/screenshot/console/network 证据、关闭。
+- **页面标注** — `/annotate` 在有头浏览器窗口里打开页面，点选元素写批注，结构化报告直接发送进对话。
 
 用户级安装一次，所有项目都获得这些工具。
 
@@ -55,10 +56,12 @@ pi remove npm:@cynos-ai/tools
 | `cynos_browser_interact` | click / fill / press / select / hover / scroll / wait。 |
 | `cynos_browser_inspect` | snapshot（元素 ref）/ screenshot / console / requests / eval。 |
 | `cynos_browser_close` | 关闭当前会话的浏览器。 |
+| `cynos_browser_annotate` | 打开有头标注窗口；用户拖区域/点元素写批注，返回报告。阻塞至提交。 |
 
 ## 命令
 
-- `/cynos-tools-config` — 编辑搜索 API key、视觉模型、浏览器启动选项。
+- `/annotate <url>` — 在有头浏览器窗口中标注页面元素，报告以用户消息形式发送给 agent。
+- `/cynos-tools-config` — 编辑搜索 API key、视觉模型、浏览器启动与标注选项。
 - `/cynos-tools-browser-setup` — 探测系统浏览器；可选安装 Chromium。
 
 ## 配置
@@ -75,7 +78,13 @@ pi remove npm:@cynos-ai/tools
     "channel": "chrome",
     "executablePath": null,
     "headless": true,
-    "timeoutMs": 30000
+    "timeoutMs": 30000,
+    "args": ["--ozone-platform=x11"],
+    "annotate": {
+      "timeoutMs": 600000,
+      "screenshots": true,
+      "uiLanguage": "auto"
+    }
   }
 }
 ```
@@ -116,6 +125,18 @@ URL 策略：
 - 禁止：`file:`、`data:`、`javascript:`、`chrome:`、`devtools:`、`about:`、link-local 与云元数据地址。
 
 工作流：`cynos_browser_navigate` → `cynos_browser_inspect(action="snapshot")` 获取元素 ref → `cynos_browser_interact` 使用 ref → `cynos_browser_inspect(action="screenshot"|"console"|"requests"|"eval")` 采集证据 → `cynos_browser_close`。导航后 ref 失效，需重新 snapshot。
+
+### 页面标注（`/annotate` 或自然语言）
+
+`/annotate <url>` —— 或直接对 agent 说（"用 /annotate 标注这个页面"，它会调用 `cynos_browser_annotate`）—— 会在**有头**浏览器窗口打开页面（无头会话自动以有头重启），并注入 Codex 风格的标注 overlay。无需安装浏览器扩展或 Native Host：
+
+1. **页面默认可正常操作。** 点 **开始标注** 进入标注模式；随时点 **完成标注** 退出回到正常交互（已加批注保留）。
+2. **区域模式（默认）**：拖出矩形区域，在弹窗里输入批注，可连续多次。**元素模式**：点击 HTML 元素附加选择器级上下文。`Esc` 先退出标注模式，再收起面板。
+3. **底部栏**是整体需求输入框 + **一起发送 (N)**：一次提交序列化所有批注（区域含文档坐标矩形 + 逐区域裁剪图，元素含选择器/盒模型/无障碍/样式），同时截取带徽章的视口图和干净全页图，生成 Markdown 报告（命令路径：作为用户消息；工具路径：作为工具结果供 agent 立即处理）。
+
+Overlay 界面**默认中文**；自动跟随系统 locale（`LANG`/`LC_ALL`），可用 `browser.annotate.uiLanguage`（`"zh" | "en" | "auto"`）覆盖。随时再次运行 `/annotate` 进行下一轮；浏览器会话复用。其他选项：`browser.annotate.timeoutMs`（默认 10 分钟）、`browser.annotate.screenshots`、`browser.args`（额外 Chromium 启动参数）。
+
+限制：标注发生在隔离临时会话中（无登录态）；批注不跨页面导航保留；仅主框架可标注（不支持 iframe / 穿透 shadow host）。
 
 ## 安全说明
 

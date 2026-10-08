@@ -46,6 +46,7 @@ async function main() {
     minify: false,
     logLevel: "info",
     metafile: true,
+    plugins: [rawTextPlugin()],
   });
 
   assertHostPackagesExternal(buildResult.metafile);
@@ -68,6 +69,25 @@ function assertHostPackagesExternal(metafile) {
   if (bundledHostImports.length > 0) {
     throw new Error(`Host/package(s) were bundled instead of externalized: ${bundledHostImports.map((item) => item.path).join(", ")}`);
   }
+}
+
+// Resolves `*.js?raw` imports (Vite/vitest convention) to the file's text content.
+// Used to inline the annotate overlay JS into the bundle without shipping a
+// separate asset file. vitest handles `?raw` natively on its own.
+function rawTextPlugin() {
+  return {
+    name: "cynos-raw-text",
+    setup(build) {
+      build.onResolve({ filter: /\?raw$/ }, (args) => ({
+        path: path.resolve(args.resolveDir, args.path.replace(/\?raw$/, "")),
+        namespace: "raw-text",
+      }));
+      build.onLoad({ filter: /.*/, namespace: "raw-text" }, async (args) => ({
+        contents: await fs.promises.readFile(args.path, "utf8"),
+        loader: "text",
+      }));
+    },
+  };
 }
 
 main().catch((err) => {

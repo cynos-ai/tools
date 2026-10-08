@@ -22,6 +22,7 @@ Four capabilities, exposed as pi tools the agent can call directly:
 - **Web fetch** — `cynos_fetch` pulls the full text of public pages.
 - **Vision** — `cynos_vision` analyzes local image files (screenshots, UI, charts, diagrams) with a vision-capable model.
 - **Browser automation** — `cynos_browser_*` drives an isolated browser: navigate, interact, capture snapshot/screenshot/console/network evidence, and close.
+- **Page annotation** — `/annotate` opens the page in a headed browser window where you pick elements and leave comments; the structured report is sent straight into the conversation.
 
 Install once at the user level and every project gets these tools.
 
@@ -55,10 +56,12 @@ pi remove npm:@cynos-ai/tools
 | `cynos_browser_interact` | click / fill / press / select / hover / scroll / wait on the current page. |
 | `cynos_browser_inspect` | snapshot (element refs) / screenshot / console / requests / eval. |
 | `cynos_browser_close` | Close the current session's browser. |
+| `cynos_browser_annotate` | Open a headed annotate window; the user draws regions / picks elements and comments; returns the report. Blocks until submit. |
 
 ## Commands
 
-- `/cynos-tools-config` — edit search API keys, vision model, and browser launch options.
+- `/annotate <url>` — annotate page elements in a headed browser window; the report is sent to the agent as a user message.
+- `/cynos-tools-config` — edit search API keys, vision model, browser launch, and annotate options.
 - `/cynos-tools-browser-setup` — probe system browsers; optionally install Chromium.
 
 ## Configuration
@@ -75,7 +78,13 @@ Config lives at `~/.pi/agent/cynos-tools.json`:
     "channel": "chrome",
     "executablePath": null,
     "headless": true,
-    "timeoutMs": 30000
+    "timeoutMs": 30000,
+    "args": ["--ozone-platform=x11"],
+    "annotate": {
+      "timeoutMs": 600000,
+      "screenshots": true,
+      "uiLanguage": "auto"
+    }
   }
 }
 ```
@@ -117,6 +126,18 @@ URL policy:
 - Blocked: `file:`, `data:`, `javascript:`, `chrome:`, `devtools:`, `about:`, link-local and cloud-metadata addresses.
 
 Workflow: `cynos_browser_navigate` → `cynos_browser_inspect(action="snapshot")` to get element refs → `cynos_browser_interact` using those refs → `cynos_browser_inspect(action="screenshot"|"console"|"requests"|"eval")` to capture evidence → `cynos_browser_close`. Refs are invalidated by navigation, so re-snapshot after navigating.
+
+### Page annotation (`/annotate` or ask in natural language)
+
+`/annotate <url>` — or just ask the agent ("用 /annotate 标注这个页面", it calls `cynos_browser_annotate`) — opens the page in a **headed** browser window (headless sessions are relaunched headed automatically) and injects a Codex-style annotation overlay. No browser extension or native-host install needed:
+
+1. **The page stays fully interactive.** Press **开始标注 / Start annotating** to enter annotation mode; press **完成标注 / Done** at any time to go back to normal interaction (notes are kept).
+2. **Region mode (default)**: drag a rectangle, type a comment in the popover, repeat. **Element mode**: click an HTML element to attach selector-level context. `Esc` exits annotating mode first, then hides the panel.
+3. The **bottom bar** holds the overall context plus **一起发送 / Send all (N)** — one submission serializes every note (regions with document-space rectangles + per-region crops, elements with selectors/box-model/a11y/styles), screenshots the viewport with badges and the clean full page, and delivers the Markdown report (command: as a user message; tool: as the tool result the agent acts on immediately).
+
+The overlay UI is **Chinese by default**; it follows the system locale automatically (`LANG`/`LC_ALL`), overridable via `browser.annotate.uiLanguage` (`"zh" | "en" | "auto"`). Run `/annotate` again anytime for another round; the browser session is reused. Extra options: `browser.annotate.timeoutMs` (default 10 min), `browser.annotate.screenshots`, and `browser.args` for extra Chromium launch flags.
+
+Limitations: annotations happen in the isolated ephemeral context (no login state); notes do not survive page navigation; only the main frame is annotatable (no iframes / shadow-host piercing).
 
 ## Security notes
 

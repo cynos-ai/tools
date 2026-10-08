@@ -1,4 +1,5 @@
 import { ensureDir, readJsonFile, writeJsonAtomic, writeJsonAtomicIfAbsent } from "../infra/fs-utils";
+import { BROWSER_ANNOTATE_TIMEOUT_MS, BROWSER_DEFAULT_TIMEOUT_MS } from "../infra/limits";
 import { userConfigPath } from "./paths";
 import * as path from "node:path";
 
@@ -7,6 +8,18 @@ export interface BrowserConfig {
   executablePath?: string | null;
   headless?: boolean;
   timeoutMs?: number;
+  /** Extra Chromium launch args (e.g. ["--ozone-platform=x11"]). */
+  args?: string[] | null;
+  annotate?: AnnotateConfig;
+}
+
+export interface AnnotateConfig {
+  /** How long /annotate waits for the user to submit, in ms. */
+  timeoutMs?: number;
+  /** Capture per-note element screenshots. */
+  screenshots?: boolean;
+  /** Overlay UI language: auto follows the system locale (zh default). */
+  uiLanguage?: "zh" | "en" | "auto";
 }
 
 export interface ToolsConfig {
@@ -52,7 +65,9 @@ export async function ensureUserConfig(defaults: ToolsConfig = DEFAULT_CONFIG): 
   await writeJsonAtomicIfAbsent(userConfigPath(), defaults, { mode: 0o600 });
 }
 
-export async function getBrowserConfig(): Promise<Required<Pick<BrowserConfig, "headless" | "timeoutMs">> & BrowserConfig> {
+export async function getBrowserConfig(): Promise<
+  Required<Pick<BrowserConfig, "headless" | "timeoutMs">> & BrowserConfig & { args: string[]; annotate: { timeoutMs: number; screenshots: boolean; uiLanguage: "zh" | "en" | "auto" } }
+> {
   const config = await readConfig();
   const browser = config.browser ?? {};
   return {
@@ -60,6 +75,18 @@ export async function getBrowserConfig(): Promise<Required<Pick<BrowserConfig, "
     executablePath: browser.executablePath ?? null,
     headless: browser.headless !== false,
     timeoutMs: typeof browser.timeoutMs === "number" && browser.timeoutMs > 0 ? browser.timeoutMs : DEFAULT_BROWSER_TIMEOUT_MS,
+    args: Array.isArray(browser.args) ? browser.args.filter((a): a is string => typeof a === "string") : [],
+    annotate: {
+      timeoutMs:
+        typeof browser.annotate?.timeoutMs === "number" && browser.annotate.timeoutMs > 0
+          ? browser.annotate.timeoutMs
+          : BROWSER_ANNOTATE_TIMEOUT_MS,
+      screenshots: browser.annotate?.screenshots !== false,
+      uiLanguage:
+        browser.annotate?.uiLanguage === "zh" || browser.annotate?.uiLanguage === "en"
+          ? browser.annotate.uiLanguage
+          : "auto",
+    },
   };
 }
 
