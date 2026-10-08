@@ -2,6 +2,10 @@
 
 All notable public changes to Cynos Tools are documented here.
 
+## 0.6.0
+
+- The annotate overlay panel can now be dragged by its header (hide/close buttons stay clickable). The position clamps to the viewport so the header always stays reachable, persists in sessionStorage, and survives page switches / overlay reinstalls.
+
 ## 0.5.0
 
 - Fix `/annotate` blocking the TUI input path: the command now returns immediately and the flow runs in the background (status line still shows progress); the report is delivered as a user message when the user submits.
