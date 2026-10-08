@@ -28,7 +28,7 @@
 (function () {
   "use strict";
 
-  var VERSION = 5;
+  var VERSION = 6;
   var MAX_NOTES = 100;
   var MIN_REGION_SIZE = 4;
   var TEXT_LIMITS = { selector: 1000, comment: 2000, textPreview: 300, attrValue: 200, attrCount: 40, styleCount: 30 };
@@ -79,7 +79,6 @@
       removeNote: "删除此批注",
       removeRegion: "删除此区域",
       regionClickEdit: "点击编辑",
-      elementBadge: "（元素）",
       scrollTitle: "点击滚动到视野",
       sentToast: "已发送 {N} 条批注 ✓ 可继续标注、切换页面，再次发送会自动送达",
       stashToast: "已暂存本页 {N} 条批注（随下一次发送一起提交）",
@@ -126,7 +125,6 @@
       removeNote: "Remove note",
       removeRegion: "Remove region",
       regionClickEdit: "click to edit",
-      elementBadge: " (element)",
       scrollTitle: "Click to scroll into view",
       sentToast: "Sent {N} note(s) ✓ keep annotating or switch pages — the next send is delivered too",
       stashToast: "Stashed {N} note(s) from this page (included in the next send)",
@@ -412,10 +410,7 @@
     "#ca-highlight { position: absolute; display: none; border: 2px solid #f59e0b; background: rgba(245,158,11,.12); border-radius: 2px; }",
     "#ca-highlight .ca-tag { position: absolute; top: -18px; left: -2px; background: #f59e0b; color: #111; padding: 1px 6px; border-radius: 3px 3px 0 0; white-space: nowrap; max-width: 320px; overflow: hidden; text-overflow: ellipsis; }",
     ".ca-rubber { position: absolute; display: none; border: 1.5px dashed #2563eb; background: rgba(37,99,235,.12); }",
-    ".ca-region { position: absolute; border: 1.5px solid #2563eb; background: rgba(37,99,235,.06); border-radius: 2px; pointer-events: auto; cursor: pointer; }",
-    ".ca-badge { position: absolute; transform: translate(0, -50%); min-width: 18px; height: 18px; border-radius: 9px; background: #2563eb; color: #fff; font-size: 11px; font-weight: 700; display: flex; align-items: center; justify-content: center; padding: 0 5px; box-shadow: 0 1px 3px rgba(0,0,0,.4); pointer-events: auto; border: 1px solid #fff; }",
-    ".ca-badge.element { transform: translate(-50%, -50%); cursor: pointer; }",
-    ".ca-badge.missing { background: #9ca3af; }",
+    ".ca-region { position: absolute; border: 1.5px solid #2563eb; background: rgba(37,99,235,.06); border-radius: 2px; pointer-events: none; }",,
     ".ca-pop { position: absolute; width: 240px; background: #111827; color: #e5e7eb; border: 1px solid #374151; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.5); padding: 8px; pointer-events: auto; }",
     ".ca-pop textarea { width: 100%; min-height: 44px; background: #1f2937; color: #e5e7eb; border: 1px solid #374151; border-radius: 6px; padding: 5px 7px; resize: vertical; }",
     ".ca-pop .ca-pop-btns { display: flex; gap: 6px; justify-content: flex-end; margin-top: 6px; }",
@@ -490,7 +485,6 @@
 
     els.shapes = el("div");
     root.appendChild(els.shapes);
-    els.badges = [];
 
     els.toast = el("div");
     els.toast.id = "ca-toast";
@@ -682,66 +676,19 @@
     renderCards();
   }
 
-  // ---------- shapes (regions + element badges) ----------
+  // ---------- transient region box ----------
+  // Saved notes are NOT drawn on the page: the panel is the single place to
+  // view/edit them. A region box is rendered only while its comment popover
+  // is open (just drawn, or re-opened from the panel), then removed.
   function updateShapes() {
-    while (els.shapes.firstChild) els.shapes.removeChild(els.shapes.firstChild);
-    els.badges = [];
-    regions.forEach(function (r) { addRegionShape(r); });
-    elements.forEach(function (e) { addElementBadge(e); });
-    positionShapes();
     updatePill();
   }
 
-  function addRegionShape(r) {
-    var box = el("div", "ca-region");
-    box.title = r.comment ? "#" + r.n + ": " + r.comment : "#" + r.n + " — " + t("regionClickEdit");
-    box.addEventListener("click", function (ev) {
-      ev.stopPropagation();
-      openPopover(r, box);
-    });
-    els.shapes.appendChild(box);
-    var badge = el("div", "ca-badge", String(r.n));
-    badge.addEventListener("click", function (ev) { ev.stopPropagation(); openPopover(r, box); });
-    els.shapes.appendChild(badge);
-    els.badges.push({ kind: "region", note: r, box: box, badge: badge });
-  }
-
-  function addElementBadge(e) {
-    var badge = el("div", "ca-badge element", String(e.n));
-    badge.title = e.comment ? "#" + e.n + ": " + e.comment : "#" + e.n + t("elementBadge");
-    badge.addEventListener("click", function (ev) {
-      ev.stopPropagation();
-      try {
-        e.el.scrollIntoView({ block: "center", behavior: "smooth" });
-      } catch (err) { /* ignore */ }
-    });
-    els.shapes.appendChild(badge);
-    els.badges.push({ kind: "element", note: e, badge: badge });
-  }
-
   function positionShapes() {
-    var sx = window.scrollX, sy = window.scrollY;
-    for (var i = 0; i < els.badges.length; i++) {
-      var b = els.badges[i];
-      if (b.kind === "region") {
-        b.box.style.left = (b.note.doc.x - sx) + "px";
-        b.box.style.top = (b.note.doc.y - sy) + "px";
-        b.box.style.width = b.note.doc.w + "px";
-        b.box.style.height = b.note.doc.h + "px";
-        b.badge.style.left = (b.note.doc.x - sx) + "px";
-        b.badge.style.top = (b.note.doc.y - sy) + "px";
-      } else {
-        var rect = null;
-        try { rect = b.note.el.isConnected ? b.note.el.getBoundingClientRect() : null; } catch (e) { rect = null; }
-        if (!rect || (rect.width === 0 && rect.height === 0)) {
-          b.badge.classList.add("missing");
-          b.badge.style.left = "-100px"; b.badge.style.top = "-100px";
-          continue;
-        }
-        b.badge.classList.remove("missing");
-        b.badge.style.left = (rect.left + Math.min(rect.width / 2, 24)) + "px";
-        b.badge.style.top = rect.top + "px";
-      }
+    // Keep the transient box under an open popover glued to its region on scroll.
+    if (popover && popover.boxEl && popover.note && popover.note.doc) {
+      popover.boxEl.style.left = (popover.note.doc.x - window.scrollX) + "px";
+      popover.boxEl.style.top = (popover.note.doc.y - window.scrollY) + "px";
     }
     if (els.highlight.style.display !== "none") {
       var r = null;
@@ -769,11 +716,29 @@
     popover = null;
     if (save && p.textarea) p.onSave(p.textarea.value);
     if (p.node.parentNode) p.node.parentNode.removeChild(p.node);
+    // Saved/closed → the region box disappears from the page again.
+    if (p.boxEl && p.boxEl.parentNode) p.boxEl.parentNode.removeChild(p.boxEl);
   }
 
-  function openPopover(note, anchorBox) {
+  // Viewport-space anchor for a region's popover + transient box.
+  function regionAnchorRect(r) {
+    return {
+      left: r.doc.x - window.scrollX,
+      top: r.doc.y - window.scrollY,
+      width: r.doc.w,
+      height: r.doc.h,
+    };
+  }
+
+  function openPopover(note, anchorRect) {
     closePopover(false);
     markActivity();
+    // Transient box: shows which area this popover edits, then disappears.
+    var boxEl = null;
+    if (note.doc) {
+      boxEl = el("div", "ca-region");
+      els.shapes.appendChild(boxEl);
+    }
     var node = el("div", "ca-pop");
     var ta = document.createElement("textarea");
     ta.value = note.comment || "";
@@ -797,17 +762,24 @@
     node.appendChild(el("div", "ca-hintk", t("popHint")));
     root.appendChild(node);
 
-    var boxRect = anchorBox.getBoundingClientRect();
-    var left = Math.min(Math.max(8, boxRect.left), window.innerWidth - 256);
-    var top = boxRect.top + boxRect.height + 6;
-    if (top + 140 > window.innerHeight) top = Math.max(8, boxRect.top - 146);
+    var left = Math.min(Math.max(8, anchorRect.left), window.innerWidth - 256);
+    var top = anchorRect.top + anchorRect.height + 6;
+    if (top + 140 > window.innerHeight) top = Math.max(8, anchorRect.top - 146);
     node.style.left = left + "px";
     node.style.top = top + "px";
+
+    if (boxEl && note.doc) {
+      boxEl.style.left = (note.doc.x - window.scrollX) + "px";
+      boxEl.style.top = (note.doc.y - window.scrollY) + "px";
+      boxEl.style.width = note.doc.w + "px";
+      boxEl.style.height = note.doc.h + "px";
+    }
 
     popover = {
       node: node,
       textarea: ta,
       note: note,
+      boxEl: boxEl,
       onSave: function (value) {
         note.comment = String(value || "").slice(0, TEXT_LIMITS.comment);
         renderCards();
@@ -881,11 +853,9 @@
     regions.push(region);
     renderCards();
     updateShapes();
-    var shape = els.badges.find(function (b) { return b.kind === "region" && b.note === region; });
     // Screenshot the crop first (host hides shapes while capturing), then edit.
     captureNoteSnapshot(serializeRegionNote(region)).then(function () {
-      var liveShape = els.badges.find(function (b) { return b.kind === "region" && b.note === region; });
-      if (liveShape) openPopover(region, liveShape.box);
+      openPopover(region, regionAnchorRect(region));
     });
   }
 
@@ -1043,11 +1013,11 @@
     var label = el("span", "ca-sel", t("regionLabel") + " " + r.doc.w + "×" + r.doc.h + (r.center ? " · " + r.center.tag : ""));
     label.title = t("regionClickEdit");
     label.addEventListener("click", function () {
-      var shape = els.badges.find(function (b) { return b.kind === "region" && b.note === r; });
       try {
         window.scrollTo({ top: Math.max(0, r.doc.y - 80), behavior: "smooth" });
       } catch (e) { /* ignore */ }
-      if (shape) setTimeout(function () { openPopover(r, shape.box); }, 250);
+      // Edit here: re-open the popover (transient box included) at the region.
+      setTimeout(function () { openPopover(r, regionAnchorRect(r)); }, 250);
     });
     head.appendChild(label);
     var delBtn = el("button", "ca-btn", "×");

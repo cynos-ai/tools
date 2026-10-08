@@ -3,6 +3,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { formatAnnotateReport, normalizeAnnotatePayload, normalizeAnnotatePages } from "../extensions/browser/annotate-report";
+import { dispatchEvent as annotateDispatchEvent, nextEvent as annotateNextEvent } from "../extensions/browser/annotate";
 import { getBrowserConfig, readConfig, writeUserConfig } from "../extensions/config/store";
 // vitest supports `?raw` natively; the same import the annotate command uses.
 import overlaySource from "../extensions/browser/annotate-overlay.js?raw";
@@ -286,6 +287,31 @@ describe("annotate overlay source", () => {
     expect(overlaySource).toContain("setPointerCapture");
     expect(overlaySource).toContain("cynosAnnotatePanelPos");
     expect(overlaySource).toContain("restorePanelPos");
+  });
+
+  it("hides saved shapes: region boxes render only while their popover is open", () => {
+    expect(overlaySource).not.toContain("addElementBadge");
+    expect(overlaySource).not.toContain("addRegionShape");
+    expect(overlaySource).toContain("regionAnchorRect");
+    expect(overlaySource).toContain("p.boxEl && p.boxEl.parentNode");
+  });
+});
+
+describe("annotate event plumbing", () => {
+  it("cancelled waiters do not steal later events (submit-swallowing regression)", async () => {
+    const fakePage = { __fake: 1 } as any;
+    const stale = annotateNextEvent(fakePage);
+    stale.cancel();
+    const live = annotateNextEvent(fakePage);
+    annotateDispatchEvent(fakePage, { type: "submit", notes: [] });
+    await expect(live.promise).resolves.toEqual({ type: "submit", notes: [] });
+  });
+
+  it("queues events when nobody is waiting and delivers them to the next waiter", async () => {
+    const fakePage = { __fake: 2 } as any;
+    annotateDispatchEvent(fakePage, { type: "page-stash" });
+    const waiter = annotateNextEvent(fakePage);
+    await expect(waiter.promise).resolves.toEqual({ type: "page-stash" });
   });
 });
 
