@@ -2,9 +2,15 @@
 
 All notable public changes to Cynos Tools are documented here.
 
-## 0.4.0
+## 0.5.0
 
-- Add `/annotate` + `cynos_browser_annotate`: Codex-style page annotation in the tools-managed headed browser. The page stays interactive; "开始标注" enters region-drag mode (rectangle + comment, repeat), element mode adds selector context, and the bottom bar's "一起发送" submits all notes at once — regions are cropped from the full-page render at their document coordinates, elements keep selectors/box-model/a11y/styles. Report goes to the conversation as a user message (command) or the tool result (agent-invoked). No browser extension or native-host install required.
+- Fix `/annotate` blocking the TUI input path: the command now returns immediately and the flow runs in the background (status line still shows progress); the report is delivered as a user message when the user submits.
+- Annotate sessions are persistent and multi-round: submitting ("一起发送") keeps the overlay installed, and a background watcher forwards every later submit to the conversation as a new user message — no rerun of `/annotate` between rounds. "取消" only clears unsent notes; a new ✕ button removes the overlay for good (auto-removed after 1h idle).
+- Notes are screenshotted at creation time (the overlay briefly hides its shapes), so per-note crops always match what the user saw; the stale full-page overview screenshot is gone.
+- SPA page switches auto-stash the current page's notes (no stale boxes left behind): stashed pages are listed in the panel, ride along with the next send, and the report groups notes per page. Hard navigations mid-round are survived via a server-side stash restore.
+- Routing guarantees: submits always arrive in the pi session that opened the browser window (isolated per session); a second concurrent annotate flow on the same session is rejected with a clear error instead of stealing the first one's submit.
+
+## 0.4.0
 - Overlay UI is Chinese by default and follows the system locale; `browser.annotate.uiLanguage` (`zh`/`en`/`auto`) overrides.
 - Add `browser.annotate` config (`timeoutMs`, `screenshots`, `uiLanguage`) and `browser.args` (extra Chromium launch flags) with `/cynos-tools-config` menu entries; annotate sessions automatically relaunch headless browsers headed.
 
